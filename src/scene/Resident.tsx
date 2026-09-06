@@ -4,6 +4,7 @@ import { type Group } from "three";
 import { RIG, createBlockPerson, tintPerson } from "../actor/blockBody";
 import { type Controller, type PlayOpts } from "../actor/Controller";
 import { PosePlayer } from "../actor/posePlayer";
+import { DEV } from "../dev";
 import { usePalette } from "../useTheme";
 import { type ShoeboxMetrics } from "./shoebox";
 
@@ -34,7 +35,7 @@ export function Resident({
       player.onFinished = null;
       if (controller.play === play) controller.play = null;
     };
-    // metrics is read once at mount; resize uses keepInRoom from tick
+    // metrics at mount; later size changes go through Controller.relayout
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, player]);
 
@@ -52,10 +53,14 @@ export function Resident({
   return (
     <group
       ref={group}
-      onClick={(event) => {
-        event.stopPropagation();
-        controller.clickCharacter();
-      }}
+      onClick={
+        DEV
+          ? (event) => {
+              event.stopPropagation();
+              controller.clickCharacter();
+            }
+          : undefined
+      }
     >
       <primitive object={person.root} />
     </group>

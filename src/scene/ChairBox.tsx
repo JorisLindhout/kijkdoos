@@ -1,41 +1,27 @@
 import { useEffect, useMemo } from "react";
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from "three";
 import { usePalette } from "../useTheme";
+import {
+  CHAIR_SEAT,
+  CHAIR_SEAT_HEIGHT,
+  chairLive,
+  useFurniture,
+} from "./furniture";
 import { type ShoeboxMetrics } from "./shoebox";
 
-export const CHAIR_ID = "chair-1";
-/** Seat top. Matches a sitting adult’s shin + foot. */
-export const CHAIR_SEAT_HEIGHT = 0.47;
-/** Square seat: width and depth equal the seat height. */
-export const CHAIR_SEAT = CHAIR_SEAT_HEIGHT;
+export {
+  CHAIR_ID,
+  CHAIR_SEAT,
+  CHAIR_SEAT_HEIGHT,
+  CHAIR_SIZE,
+  chairSitPoint,
+} from "./furniture";
+
 /** Uniform stock for legs, rails, and seat frame. */
 export const CHAIR_STOCK = 0.044;
 /** Total height is twice the seat, as in the oak original. */
 export const CHAIR_TOTAL_H = CHAIR_SEAT_HEIGHT * 2;
 const RAIL_H = CHAIR_STOCK * 1.75;
-export const CHAIR_SIZE: [number, number, number] = [
-  CHAIR_SEAT,
-  CHAIR_SEAT_HEIGHT,
-  CHAIR_SEAT,
-];
-/** Faces into the room from the right-back corner. */
-export const CHAIR_YAW = (-60 * Math.PI) / 180;
-const CORNER_INSET = 0.54;
-
-export function chairPos(metrics: ShoeboxMetrics): [number, number, number] {
-  return [metrics.width - CORNER_INSET, 0, -metrics.depth + CORNER_INSET];
-}
-
-export function chairForward() {
-  return { x: Math.sin(CHAIR_YAW), z: Math.cos(CHAIR_YAW) };
-}
-
-export function chairSitPoint(metrics: ShoeboxMetrics): [number, number, number] {
-  const [x, , z] = chairPos(metrics);
-  const f = chairForward();
-  const d = CHAIR_SEAT / 2 - 0.01;
-  return [x + f.x * d, 0, z + f.z * d];
-}
 
 function useOakMap() {
   const map = useMemo(() => {
@@ -67,12 +53,23 @@ function useOakMap() {
   return map;
 }
 
-function Oak({ map, tone, fallback }: { map: CanvasTexture | null; tone: string; fallback: string }) {
+function Oak({
+  map,
+  tone,
+  fallback,
+  lightOn,
+}: {
+  map: CanvasTexture | null;
+  tone: string;
+  fallback: string;
+  lightOn: boolean;
+}) {
   return (
     <meshStandardMaterial
-      map={map ?? undefined}
-      color={map ? tone : fallback}
-      roughness={0.62}
+      key={lightOn ? "lit" : "off"}
+      map={lightOn && map ? map : null}
+      color={lightOn ? (map ? tone : fallback) : tone}
+      roughness={lightOn ? 0.62 : 0.72}
       metalness={0.02}
     />
   );
@@ -84,17 +81,19 @@ function Beam({
   map,
   tone,
   fallback,
+  lightOn,
 }: {
   position: [number, number, number];
   size: [number, number, number];
   map: CanvasTexture | null;
   tone: string;
   fallback: string;
+  lightOn: boolean;
 }) {
   return (
-    <mesh position={position} castShadow receiveShadow>
+    <mesh position={position} castShadow receiveShadow={lightOn}>
       <boxGeometry args={size} />
-      <Oak map={map} tone={tone} fallback={fallback} />
+      <Oak map={map} tone={tone} fallback={fallback} lightOn={lightOn} />
     </mesh>
   );
 }
@@ -106,11 +105,12 @@ export function ChairBox({
   metrics: ShoeboxMetrics;
   onSit?: () => void;
 }) {
-  const [x, , z] = chairPos(metrics);
+  const { lightOn } = useFurniture();
+  const { x, z, yaw } = chairLive(metrics);
   const oak = useOakMap();
   const palette = usePalette();
-  const wood = palette.wood.tone;
-  const seat = palette.wood.seat;
+  const wood = lightOn ? palette.wood.tone : palette.body.paper;
+  const seat = lightOn ? palette.wood.seat : palette.body.paper;
   const fallback = palette.wood.fallback;
   const t = CHAIR_STOCK;
   const w = CHAIR_SEAT;
@@ -122,7 +122,7 @@ export function ChairBox({
   return (
     <group
       position={[x, 0, z]}
-      rotation={[0, CHAIR_YAW, 0]}
+      rotation={[0, yaw, 0]}
       onClick={(event) => {
         event.stopPropagation();
         onSit?.();
@@ -136,6 +136,7 @@ export function ChairBox({
           map={oak}
           tone={wood}
           fallback={fallback}
+          lightOn={lightOn}
         />
       ))}
       {([-1, 1] as const).map((side) => (
@@ -146,6 +147,7 @@ export function ChairBox({
           map={oak}
           tone={wood}
           fallback={fallback}
+          lightOn={lightOn}
         />
       ))}
       <Beam
@@ -154,6 +156,7 @@ export function ChairBox({
         map={oak}
         tone={seat}
         fallback={fallback}
+        lightOn={lightOn}
       />
       <Beam
         position={[0, seatY, edge]}
@@ -161,6 +164,7 @@ export function ChairBox({
         map={oak}
         tone={wood}
         fallback={fallback}
+        lightOn={lightOn}
       />
       <Beam
         position={[0, seatY, -edge]}
@@ -168,6 +172,7 @@ export function ChairBox({
         map={oak}
         tone={wood}
         fallback={fallback}
+        lightOn={lightOn}
       />
       <Beam
         position={[edge, seatY, 0]}
@@ -175,6 +180,7 @@ export function ChairBox({
         map={oak}
         tone={wood}
         fallback={fallback}
+        lightOn={lightOn}
       />
       <Beam
         position={[-edge, seatY, 0]}
@@ -182,6 +188,7 @@ export function ChairBox({
         map={oak}
         tone={wood}
         fallback={fallback}
+        lightOn={lightOn}
       />
       <Beam
         position={[0, CHAIR_TOTAL_H - RAIL_H / 2, -edge]}
@@ -189,6 +196,7 @@ export function ChairBox({
         map={oak}
         tone={wood}
         fallback={fallback}
+        lightOn={lightOn}
       />
     </group>
   );

@@ -36,7 +36,26 @@ Preview with `?hour=13` (day) or `?hour=1` (night).
 
 Standing and sitting both have a living idle (weight shift, look around) and **still** (frozen). He does not always move.
 
-The dummy brain can pick: `idle`, `still`, `fidget`, `walk_to`, `sit`, `stand`, `wave`, `glare`, `look_at_user`, `emote`. Turns happen locally while walking. Fidget, look, and still work in the chair too.
+The dummy brain can pick: `idle`, `still`, `fidget`, `walk_to`, `sit`, `stand`, `wave`, `glare`, `look_at_user`, `emote`, `push_chair`, `move_chair`, `light_on`, `light_off`. Turns happen locally while walking. Fidget, look, and still work in the chair too.
+
+## Furniture and lamp
+
+Chair `chair-1` keeps a live pose (floor UV + yaw). Sit and walk still work after it moves. The dummy rarely asks to `push_chair` (slide, same facing) or `move_chair` (new legal pose). If a push or turn pins him against a wall, he keeps pushing the chair into the room until he can walk again. Poses that trapped him are stored and sent as `badChairPoses` / `trappedChair` so a later model can avoid them.
+
+The hanging lamp can go off. He walks under the bulb and pulls the cord. The floor stays barely readable; it is never a black frame. Day/night still tints that dim fill.
+
+Pose, lamp, and learned bad chair poses persist in `localStorage` (`kijkdoos.visit.v1`). Debug keys (not in the on-screen hint): O lamp, P push, M move.
+
+## Moods and visits
+
+Each time the page is shown, a visit starts. Mood is derived from the last **40** visits (oldest dropped):
+
+- no log → shy
+- last visit under 30 s → angry
+- last visit 2 min or more, or three of the last five that long → happy
+- otherwise → calm
+
+The dummy weights glare, sit, wave, still, and the lamp from those counts and streaks. A later model can read the same snapshot fields (`mood`, `visitCount`, `lightOn`, `visitSummary`, `trappedChair`, `badChairPoses`).
 
 ## Leftover
 

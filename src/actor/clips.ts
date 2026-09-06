@@ -15,6 +15,10 @@ export const CLIP = {
   glare: "Glaring",
   look: "Look_At_User",
   emote: "Shrug",
+  pull: "Pull_Cord",
+  grip: "Chair_Grip",
+  chairPush: "Chair_Push",
+  chairMove: "Chair_Move",
   turnLeft: "Turn_Left",
   turnRight: "Turn_Right",
 } as const;
@@ -46,6 +50,13 @@ export function clipForAction(action: ActionName): { clip: ClipId; loop: boolean
       return { clip: CLIP.glare, loop: false };
     case "emote":
       return { clip: CLIP.emote, loop: false };
+    case "light_on":
+    case "light_off":
+      return { clip: CLIP.pull, loop: false };
+    case "push_chair":
+      return { clip: CLIP.chairPush, loop: true };
+    case "move_chair":
+      return { clip: CLIP.chairMove, loop: true };
     default:
       return null;
   }

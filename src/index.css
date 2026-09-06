@@ -19,13 +19,21 @@ body,
   height: 100%;
 }
 
-.hint {
+.looking {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  inset: 0;
+  display: grid;
+  place-items: center;
   margin: 0;
+  background: var(--void, #020305);
   color: var(--hint);
   font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
   pointer-events: none;
-  text-shadow: 0 1px 2px var(--hint-shadow);
+  opacity: 1;
+  transition: opacity 200ms ease;
+  z-index: 2;
+}
+
+.looking.is-out {
+  opacity: 0;
 }

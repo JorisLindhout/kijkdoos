@@ -98,6 +98,64 @@ const WAVE_OUT: Pose = {
   },
 };
 
+const PULL_REACH: Pose = {
+  ...STAND,
+  rot: {
+    ...STAND.rot,
+    torso: [-6 * D, 0, 0],
+    head: [22 * D, 0, 0],
+    upperarm_r: [-18 * D, 0, -158 * D],
+    lowerarm_r: [8 * D, 0, -12 * D],
+  },
+};
+
+const PULL_YANK: Pose = {
+  ...PULL_REACH,
+  hipsY: HIP_HEIGHT + 0.03,
+  rot: {
+    ...PULL_REACH.rot,
+    torso: [4 * D, 0, 0],
+    head: [16 * D, 0, 0],
+    upperarm_r: [-12 * D, 0, -128 * D],
+    lowerarm_r: [4 * D, 0, -28 * D],
+  },
+};
+
+const CHAIR_GRIP: Pose = {
+  ...STAND,
+  rot: {
+    ...STAND.rot,
+    torso: [18 * D, 0, 0],
+    head: [10 * D, 0, 0],
+    upperarm_l: [58 * D, 0, 22 * D],
+    lowerarm_l: [-28 * D, 0, 0],
+    upperarm_r: [58 * D, 0, -22 * D],
+    lowerarm_r: [-28 * D, 0, 0],
+  },
+};
+
+const CHAIR_PUSH: Pose = {
+  ...CHAIR_GRIP,
+  rot: {
+    ...CHAIR_GRIP.rot,
+    torso: [28 * D, 0, 0],
+    head: [14 * D, 0, 0],
+    upperarm_l: [64 * D, 0, 18 * D],
+    upperarm_r: [64 * D, 0, -18 * D],
+  },
+};
+
+const CHAIR_TWIST: Pose = {
+  ...CHAIR_GRIP,
+  rot: {
+    ...CHAIR_GRIP.rot,
+    torso: [16 * D, 16 * D, 0],
+    head: [8 * D, 10 * D, 0],
+    upperarm_l: [52 * D, 8 * D, 26 * D],
+    upperarm_r: [62 * D, -6 * D, -18 * D],
+  },
+};
+
 const GLARE: Pose = {
   hipsY: HIP_HEIGHT,
   hipsX: 0,
@@ -439,6 +497,43 @@ export const CLIPS: Record<string, ClipDef> = {
       [0.94, WAVE_OUT],
       [1.16, WAVE_UP],
       [1.55, STAND],
+    ]),
+  },
+  Pull_Cord: {
+    kind: "keys",
+    duration: 1.28,
+    keys: keys([
+      [0, STAND],
+      [0.32, PULL_REACH],
+      [0.52, PULL_YANK],
+      [0.72, PULL_REACH],
+      [1.28, STAND],
+    ]),
+  },
+  Chair_Grip: {
+    kind: "keys",
+    duration: 0.42,
+    keys: keys([
+      [0, STAND],
+      [0.42, CHAIR_GRIP],
+    ]),
+  },
+  Chair_Push: {
+    kind: "keys",
+    duration: 0.7,
+    keys: keys([
+      [0, CHAIR_GRIP],
+      [0.35, CHAIR_PUSH],
+      [0.7, CHAIR_GRIP],
+    ]),
+  },
+  Chair_Move: {
+    kind: "keys",
+    duration: 0.9,
+    keys: keys([
+      [0, CHAIR_GRIP],
+      [0.45, CHAIR_TWIST],
+      [0.9, CHAIR_GRIP],
     ]),
   },
   Glaring: {

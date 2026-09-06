@@ -1,6 +1,14 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 
 /** Size the stage to the visible viewport, including iOS URL-bar show/hide. */
+export function viewportCssSize(): { width: number; height: number } {
+  const vv = window.visualViewport;
+  if (vv && vv.width > 0 && vv.height > 0) {
+    return { width: vv.width, height: vv.height };
+  }
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
 export function useVisualViewportFill(
   ref: RefObject<HTMLElement | null>,
 ): void {

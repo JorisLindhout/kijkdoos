@@ -1,4 +1,4 @@
-import { CHAIR_SIZE, CHAIR_YAW, chairForward, chairPos } from "./ChairBox";
+import { CHAIR_SIZE, CHAIR_STAND_GAP, chairFwd, chairLive } from "./furniture";
 import { floorPoint, type ShoeboxMetrics } from "./shoebox";
 
 export const ACTOR_RADIUS = 0.18;
@@ -19,18 +19,18 @@ export type Obstacle = {
 };
 
 function chairLocal(x: number, z: number, metrics: ShoeboxMetrics) {
-  const [cx, , cz] = chairPos(metrics);
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
   const dx = x - cx;
   const dz = z - cz;
-  const c = Math.cos(CHAIR_YAW);
-  const s = Math.sin(CHAIR_YAW);
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
   return { lx: dx * c - dz * s, lz: dx * s + dz * c };
 }
 
 function chairWorld(lx: number, lz: number, metrics: ShoeboxMetrics): FloorXZ {
-  const [cx, , cz] = chairPos(metrics);
-  const c = Math.cos(CHAIR_YAW);
-  const s = Math.sin(CHAIR_YAW);
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
   return { x: cx + lx * c + lz * s, z: cz - lx * s + lz * c };
 }
 
@@ -42,15 +42,15 @@ function chairHalf() {
 }
 
 function alongChair(metrics: ShoeboxMetrics, gap: number): [number, number, number] {
-  const [cx, , cz] = chairPos(metrics);
-  const f = chairForward();
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
+  const f = chairFwd(yaw);
   const d = CHAIR_SIZE[2] / 2 + gap;
   const walls = clampWalls(cx + f.x * d, cz + f.z * d, metrics);
   return [walls.x, 0, walls.z];
 }
 
 export function chairStandPoint(metrics: ShoeboxMetrics): [number, number, number] {
-  return alongChair(metrics, 0.32);
+  return alongChair(metrics, CHAIR_STAND_GAP);
 }
 
 export function chairApproachPoint(metrics: ShoeboxMetrics): [number, number, number] {
@@ -58,11 +58,11 @@ export function chairApproachPoint(metrics: ShoeboxMetrics): [number, number, nu
 }
 
 export function chairBody(metrics: ShoeboxMetrics): Obstacle {
-  const [x, , z] = chairPos(metrics);
+  const { x, z, yaw } = chairLive(metrics);
   const hx = CHAIR_SIZE[0] / 2;
   const hz = CHAIR_SIZE[2] / 2;
-  const c = Math.abs(Math.cos(CHAIR_YAW));
-  const s = Math.abs(Math.sin(CHAIR_YAW));
+  const c = Math.abs(Math.cos(yaw));
+  const s = Math.abs(Math.sin(yaw));
   const extX = hx * c + hz * s;
   const extZ = hx * s + hz * c;
   return { minX: x - extX, maxX: x + extX, minZ: z - extZ, maxZ: z + extZ };
@@ -271,8 +271,8 @@ export function routeAroundChair(
   }
 
   const usable = candidates.length > 0 ? candidates : edges.map(([a, b]) => [a, b, to]);
-  const [cx, , cz] = chairPos(metrics);
-  const f = chairForward();
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
+  const f = chairFwd(yaw);
   const scored = usable.map((hops) => {
     const frontBias =
       preferFront &&
@@ -290,6 +290,48 @@ export function routeAroundChair(
       return { x, z };
     })
     .filter((p, i, all) => i === 0 || Math.hypot(p.x - all[i - 1].x, p.z - all[i - 1].z) > 0.06);
+}
+
+export function canWalkAway(x: number, z: number, metrics: ShoeboxMetrics): boolean {
+  let fromX = x;
+  let fromZ = z;
+  if (overlapsChair(fromX, fromZ, metrics)) {
+    const [px, , pz] = resolveFloor(fromX, fromZ, metrics);
+    if (overlapsChair(px, pz, metrics)) return false;
+    fromX = px;
+    fromZ = pz;
+  }
+  const goals: FloorXZ[] = [
+    floorGoal(metrics, 0.5, 0.5),
+    floorGoal(metrics, 0.3, 0.35),
+    floorGoal(metrics, 0.7, 0.35),
+  ];
+  for (const goal of goals) {
+    if (Math.hypot(goal.x - fromX, goal.z - fromZ) < 0.38) continue;
+    if (overlapsChair(goal.x, goal.z, metrics)) continue;
+    const hops = routeAroundChair({ x: fromX, z: fromZ }, goal, metrics);
+    const end = hops[hops.length - 1] ?? goal;
+    if (Math.hypot(end.x - fromX, end.z - fromZ) < 0.38) continue;
+    if (pathHitsObb({ x: fromX, z: fromZ }, hops, metrics)) continue;
+    return true;
+  }
+  for (let i = 0; i < 16; i += 1) {
+    const a = (i * Math.PI * 2) / 16;
+    for (const d of [0.42, 0.7]) {
+      const [rx, , rz] = resolveFloor(fromX + Math.sin(a) * d, fromZ + Math.cos(a) * d, metrics);
+      if (Math.hypot(rx - fromX, rz - fromZ) < 0.3) continue;
+      if (overlapsChair(rx, rz, metrics)) continue;
+      if (segmentHitsObb(fromX, fromZ, rx, rz, metrics)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+function floorGoal(metrics: ShoeboxMetrics, u: number, v: number): FloorXZ {
+  const [x, , z] = floorPoint(metrics, u, v);
+  const [rx, , rz] = resolveFloor(x, z, metrics);
+  return { x: rx, z: rz };
 }
 
 export function randomClearFloor(metrics: ShoeboxMetrics): [number, number, number] {

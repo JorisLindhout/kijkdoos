@@ -1,15 +1,18 @@
 import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ACTOR_LOGIC, Controller, THOUGHT_CAP } from "../actor/Controller";
 import { requestPlan } from "../brain/client";
-import { CeilingLamp } from "./CeilingLamp";
+import { DEV, logDevCheatsheet } from "../dev";
+import { PaletteBridge, usePalette } from "../useTheme";
+import { endVisit, hydrateVisit, noteVisitStare } from "../visit";
+import { CeilingLamp, OFF_FILL } from "./CeilingLamp";
 import { ChairBox } from "./ChairBox";
+import { getChairUV, getLightOn, setChairUV, useFurniture } from "./furniture";
 import { Resident } from "./Resident";
 import { Room } from "./Room";
 import { ShoeboxCamera } from "./ShoeboxCamera";
 import { computeShoebox, type ShoeboxMetrics } from "./shoebox";
-import { useVisualViewportFill } from "./useVisualViewportFill";
-import { PaletteBridge, usePalette } from "../useTheme";
+import { useVisualViewportFill, viewportCssSize } from "./useVisualViewportFill";
 
 function Scene() {
   const { size, gl } = useThree();
@@ -27,8 +30,19 @@ function Scene() {
   }
   const c = controllerRef.current;
   const palette = usePalette();
+  const { lightOn } = useFurniture();
+
+  const prevMetrics = useRef(metrics);
+
+  useLayoutEffect(() => {
+    const prev = prevMetrics.current;
+    setChairUV(getChairUV(), metrics);
+    c.relayout(prev, metrics);
+    prevMetrics.current = metrics;
+  }, [c, metrics]);
 
   useEffect(() => {
+    if (!DEV) return;
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (key === "w") c.request({ action: "wave" }, metrics);
@@ -39,6 +53,11 @@ function Scene() {
       if (key === "i") c.request({ action: "still" }, metrics);
       if (key === "s") c.request({ action: "sit" }, metrics);
       if (key === "x" && c.seated) c.request({ action: "stand" }, metrics);
+      if (key === "o") {
+        c.request({ action: getLightOn() ? "light_off" : "light_on" }, metrics);
+      }
+      if (key === "p") c.request({ action: "push_chair" }, metrics);
+      if (key === "m") c.request({ action: "move_chair" }, metrics);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -56,8 +75,10 @@ function Scene() {
     el.addEventListener("pointerenter", enter);
     el.addEventListener("pointerleave", leave);
     const id = window.setInterval(() => {
-      if (inside) c.stareSeconds += 0.25;
-      else c.stareSeconds = 0;
+      if (inside) {
+        c.stareSeconds += 0.25;
+        noteVisitStare(c.stareSeconds);
+      } else c.stareSeconds = 0;
     }, 250);
     return () => {
       el.removeEventListener("pointerenter", enter);
@@ -81,13 +102,16 @@ function Scene() {
     <>
       <color attach="background" args={[palette.void]} />
       <ShoeboxCamera metrics={metrics} />
-      <ambientLight color={palette.ambient} intensity={palette.ambientIntensity} />
+      <ambientLight
+        color={lightOn ? palette.ambient : palette.hint}
+        intensity={lightOn ? palette.ambientIntensity : OFF_FILL}
+      />
       <CeilingLamp metrics={metrics} />
       <Room
         metrics={metrics}
-        onFloorClick={(point) => c.clickFloor(point, metrics)}
+        onFloorClick={DEV ? (point) => c.clickFloor(point, metrics) : undefined}
       />
-      <ChairBox metrics={metrics} onSit={() => c.clickChair(metrics)} />
+      <ChairBox metrics={metrics} onSit={DEV ? () => c.clickChair(metrics) : undefined} />
       <Suspense fallback={null}>
         <Resident controller={c} metrics={metrics} />
       </Suspense>
@@ -108,10 +132,54 @@ async function think(
   controller.applyPlan(plan, metrics);
 }
 
+function bootVisit() {
+  try {
+    const view = viewportCssSize();
+    hydrateVisit(computeShoebox(view.width, view.height));
+  } catch {
+    /* keep furniture defaults */
+  }
+}
+
 export function Kijkdoos() {
   const stageRef = useRef<HTMLDivElement>(null);
   const palette = usePalette();
+  const [canvasReady, setCanvasReady] = useState(false);
+  const [overlayOut, setOverlayOut] = useState(false);
+  const [overlayGone, setOverlayGone] = useState(false);
   useVisualViewportFill(stageRef);
+  useState(() => {
+    bootVisit();
+    return true;
+  });
+
+  useEffect(() => {
+    logDevCheatsheet();
+  }, []);
+
+  useEffect(() => {
+    const hide = () => endVisit();
+    const onVis = () => {
+      if (document.visibilityState === "hidden") hide();
+      else bootVisit();
+    };
+    window.addEventListener("pagehide", hide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pagehide", hide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canvasReady) return;
+    const fade = window.setTimeout(() => setOverlayOut(true), 16);
+    const gone = window.setTimeout(() => setOverlayGone(true), 220);
+    return () => {
+      window.clearTimeout(fade);
+      window.clearTimeout(gone);
+    };
+  }, [canvasReady]);
 
   return (
     <div ref={stageRef} className="stage">
@@ -120,15 +188,15 @@ export function Kijkdoos() {
         dpr={[1, 2]}
         shadows
         camera={{ fov: 55, near: 0.05, far: 40 }}
+        onCreated={() => setCanvasReady(true)}
       >
         <PaletteBridge palette={palette}>
           <Scene />
         </PaletteBridge>
       </Canvas>
-      <p className="hint">
-        Click floor to walk · click chair to sit · click character to glare · W
-        wave · G glare · F fidget · L look · E emote · I still · S sit · X stand
-      </p>
+      {!overlayGone && (
+        <p className={`looking${overlayOut ? " is-out" : ""}`}>Looking…</p>
+      )}
     </div>
   );
 }

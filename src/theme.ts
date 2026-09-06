@@ -1,4 +1,6 @@
-/** Day (warm) and night (cool) palettes. Mix with the viewer's local clock. */
+import { queryParam } from "./dev";
+
+/** Day (kraft cardboard) and night (cool) palettes. Mix with the viewer's local clock. */
 
 export type Palette = {
   void: string;
@@ -33,37 +35,37 @@ export type Palette = {
   };
 };
 
-/** Day: warm lamp light and wood tones. */
+/** Day: kraft cardboard and straw lamp light. */
 export const day: Palette = {
-  void: "#050403",
-  ambient: "#1c140e",
+  void: "#060504",
+  ambient: "#19150f",
   ambientIntensity: 0.07,
-  hint: "#d6c4a8",
+  hint: "#d0c2a4",
   hintAlpha: 0.42,
   hintShadow: "#000000",
   lamp: {
-    light: "#efd4a0",
-    halo: "#f2d9a8",
-    bulb: "#e8c980",
-    glow: "#e0b45a",
+    light: "#eee2c6",
+    halo: "#f0e6ce",
+    bulb: "#e6d4a4",
+    glow: "#c9ae70",
     intensity: 92,
     haloIntensity: 7,
     emissive: 2.1,
   },
   room: {
-    floor: "#4e3c2c",
-    wall: "#2c241c",
-    ceiling: "#1a1511",
-    back: "#261e18",
+    floor: "#5c4e34",
+    wall: "#3e3424",
+    ceiling: "#241e14",
+    back: "#332a1c",
   },
   body: {
-    paper: "#f2eee6",
-    tone: "#e8e0d4",
+    paper: "#efe6d6",
+    tone: "#e4d8c4",
   },
   wood: {
-    tone: "#f3e2c4",
-    seat: "#f7ead3",
-    fallback: "#d2b17c",
+    tone: "#e4d0ac",
+    seat: "#ead9b8",
+    fallback: "#c4a574",
   },
 };
 
@@ -136,15 +138,13 @@ export function lerpHex(a: string, b: string, t: number) {
 /**
  * 1 = full day, 0 = full night, in the viewer's local timezone.
  * Dawn ~5:30–8:00, dusk ~18:00–20:30.
- * Pass ?hour=13 or ?hour=1 to preview day or night.
+ * In dev, pass ?hour=13 or ?hour=1 to preview day or night.
  */
 export function dayAmount(now = new Date()) {
   let h = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
-  if (typeof window !== "undefined") {
-    const raw = new URLSearchParams(window.location.search).get("hour");
-    const override = raw == null ? Number.NaN : Number.parseFloat(raw);
-    if (Number.isFinite(override)) h = ((override % 24) + 24) % 24;
-  }
+  const raw = queryParam("hour");
+  const override = raw == null ? Number.NaN : Number.parseFloat(raw);
+  if (Number.isFinite(override)) h = ((override % 24) + 24) % 24;
   if (h >= 8 && h < 18) return 1;
   if (h >= 20.5 || h < 5.5) return 0;
   if (h < 8) return smoothstep((h - 5.5) / 2.5);

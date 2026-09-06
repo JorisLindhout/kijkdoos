@@ -8,9 +8,13 @@ type Env = {
 
 const SYSTEM = `You are the director of a silent shoebox resident. Reply with JSON only:
 {"action":"...","target":"...","mood":"...","say":"..."}
-action must be one of: idle, still, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote.
+action must be one of: idle, still, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote, push_chair, move_chair, light_on, light_off.
 target must be an id from the snapshot objects list, or omitted.
-Never invent objects. Prefer one action. Do not narrate.`;
+Never invent objects. Prefer one action. Do not narrate.
+Snapshot mood, visitCount, lightOn, and visitSummary are facts. Rearrange and lamp actions are rare.
+failedActions are plans that just failed in this room state. Do not pick them until the chair, lamp, or sit state changes. If push_chair failed, try move_chair instead.
+trappedChair means the resident cannot walk away from the chair. Pick push_chair until trappedChair is false. Never pick move_chair while trapped.
+badChairPoses are chair floor poses that pinned him against a wall. Do not move the chair back to those poses.`;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

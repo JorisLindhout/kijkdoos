@@ -4,6 +4,7 @@ import { BODY } from "./blockBody";
 import { STAND_DURATION, TURN_DURATION } from "./poses";
 import {
   chairStandPoint,
+  canWalkAway,
   clampWalls,
   randomClearFloor,
   resolveFloor,
@@ -11,16 +12,36 @@ import {
   stepHitsChair,
   type FloorXZ,
 } from "../scene/nav";
-import { floorPoint, type ShoeboxMetrics } from "../scene/shoebox";
 import {
   CHAIR_ID,
   CHAIR_SEAT_HEIGHT,
-  CHAIR_YAW,
-  chairPos,
-} from "../scene/ChairBox";
+  chairLive,
+  chairSitPoint,
+  defaultChairUV,
+  getBadChair,
+  getChairUV,
+  getLightOn,
+  lerpChairUV,
+  pushAwayFromWall,
+  pushChairUV,
+  randomChairUV,
+  rememberBadChair,
+  setChairUV,
+  setLightOn,
+  yankCord,
+  type ChairUV,
+} from "../scene/furniture";
+import { floorPoint, remapFloor, type ShoeboxMetrics } from "../scene/shoebox";
+import {
+  getLiveMood,
+  getVisitSummary,
+  noteVisitPoke,
+  noteVisitSit,
+  persistFurnitureNow,
+} from "../visit";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 54;
+export const ACTOR_LOGIC = 60;
 const STILL_MIN = 6;
 const STILL_MAX = 24;
 const TURN_THRESH = Math.PI * 0.55;
@@ -43,7 +64,9 @@ export type ActorPose =
   | "fidget"
   | "look"
   | "emote"
-  | "turn";
+  | "turn"
+  | "pull"
+  | "grip";
 
 export type PlayOpts = {
   reverse?: boolean;
@@ -105,12 +128,24 @@ export class Controller {
   private lastSoles: FloorXZ | null = null;
   private afterOneShot: (() => void) | null = null;
   private pendingSit = false;
+  private pendingLamp = false;
+  private pendingChair = false;
+  private pendingChairTo: { to: ChairUV; kind: "push" | "move" } | null = null;
+  private recoverTries = 0;
   private lastMetrics: ShoeboxMetrics | null = null;
   private started = false;
   private hold = 0;
   private afterHold: (() => void) | null = null;
   private afterTurn: (() => void) | null = null;
   private quiet = 0;
+  private chairTween: {
+    from: ChairUV;
+    to: ChairUV;
+    t: number;
+    duration: number;
+    follow: boolean;
+  } | null = null;
+  private failedAt = new Map<string, string>();
 
   start(metrics: ShoeboxMetrics) {
     if (this.started) {
@@ -124,7 +159,64 @@ export class Controller {
     this.z = z;
     this.yaw = 0;
     this.y = 0;
+    this.lastMetrics = metrics;
     this.holdStill();
+  }
+
+  /** Keep floor UV when the shoebox morphs; seated snaps to the chair. */
+  relayout(prev: ShoeboxMetrics, next: ShoeboxMetrics) {
+    this.lastMetrics = next;
+    if (prev.width === next.width && prev.depth === next.depth) return;
+    const map = (x: number, z: number) => remapFloor(prev, next, x, z);
+    const here = map(this.x, this.z);
+    this.x = here.x;
+    this.z = here.z;
+    this.y = 0;
+    if (this.walk) {
+      const to = map(this.walk.x, this.walk.z);
+      this.walk.x = to.x;
+      this.walk.z = to.z;
+    }
+    this.path = this.path.map((hop) => map(hop.x, hop.z));
+    if (this.footLock) {
+      const foot = map(this.footLock.x, this.footLock.z);
+      this.footLock.x = foot.x;
+      this.footLock.z = foot.z;
+    }
+    if (this.turning) {
+      const plant = map(this.turning.plantX, this.turning.plantZ);
+      this.turning.plantX = plant.x;
+      this.turning.plantZ = plant.z;
+    }
+    if (this.step) {
+      const from = map(this.step.x0, this.step.z0);
+      const to = map(this.step.x1, this.step.z1);
+      this.step.x0 = from.x;
+      this.step.z0 = from.z;
+      this.step.x1 = to.x;
+      this.step.z1 = to.z;
+    }
+    if (this.sitPlant) this.sitPlant = map(this.sitPlant.x, this.sitPlant.z);
+    if (this.seated) {
+      this.snapToSeat(next);
+      return;
+    }
+    if (this.chairTween) return;
+    if (this.pendingSit && this.walk) {
+      this.goTo(chairStandPoint(next), next, () => this.prepareSit(), true);
+      return;
+    }
+    if (this.pendingChair && this.walk && this.pendingChairTo) {
+      const dest = this.pendingChairTo;
+      this.goTo(
+        chairStandPoint(next),
+        next,
+        () => this.contactThenTween(dest.to, dest.kind),
+        true,
+      );
+      return;
+    }
+    this.keepInRoom(next);
   }
 
   private stillStand() {
@@ -134,11 +226,15 @@ export class Controller {
     this.turning = null;
     this.step = null;
     this.sitPlant = null;
+    this.chairTween = null;
     this.afterOneShot = null;
     this.afterHold = null;
     this.afterTurn = null;
     this.hold = 0;
     this.pendingSit = false;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.lookingAtUser = false;
     this.quiet = 0;
     this.pose = "idle";
@@ -146,11 +242,14 @@ export class Controller {
   }
 
   snapshot(metrics: ShoeboxMetrics): Snapshot {
+    const summary = getVisitSummary();
+    const mood = getLiveMood();
     return {
       sceneVersion: this.sceneVersion,
       objects: catalogObjects(metrics),
       character: {
         pose: this.pose,
+        mood,
         energy: this.energy,
         pos: [this.x, 0, this.z],
       },
@@ -159,6 +258,13 @@ export class Controller {
         stareSeconds: this.stareSeconds,
         poked: this.poked,
       },
+      mood,
+      visitCount: summary.visitCount,
+      lightOn: getLightOn(),
+      visitSummary: summary,
+      failedActions: this.failedNow(metrics),
+      trappedChair: this.isTrapped(metrics),
+      badChairPoses: getBadChair(),
     };
   }
 
@@ -167,7 +273,14 @@ export class Controller {
     if (plan.target && !ids.has(plan.target)) {
       return;
     }
+    if (this.failedNow(metrics).includes(plan.action)) {
+      return;
+    }
     this.lookingAtUser = plan.action === "look_at_user";
+    if (plan.action === "move_chair" && this.isTrapped(metrics)) {
+      this.request({ action: "push_chair" }, metrics);
+      return;
+    }
     this.request(plan, metrics);
   }
 
@@ -202,6 +315,18 @@ export class Controller {
       case "still":
         this.holdStill();
         break;
+      case "push_chair":
+        if (!this.pushChair(metrics)) this.noteFail("push_chair");
+        break;
+      case "move_chair":
+        if (!this.moveChair(metrics)) this.noteFail("move_chair");
+        break;
+      case "light_on":
+        this.pullLamp(true, metrics);
+        break;
+      case "light_off":
+        this.pullLamp(false, metrics);
+        break;
       default:
         if (this.seated) this.playSitIdle();
         else if (!this.walk) this.stillStand();
@@ -211,6 +336,9 @@ export class Controller {
   clickFloor(point: { x: number; z: number }, metrics: ShoeboxMetrics) {
     this.lookingAtUser = false;
     this.pendingSit = false;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.goTo([point.x, 0, point.z], metrics);
     this.record("walk_to");
   }
@@ -222,6 +350,7 @@ export class Controller {
 
   clickCharacter() {
     this.poked = true;
+    noteVisitPoke();
     this.oneShot(CLIP.glare, "glare");
     this.record("glare");
   }
@@ -244,13 +373,19 @@ export class Controller {
     return (
       this.quiet > 0 ||
       this.pendingSit ||
+      this.pendingLamp ||
+      this.pendingChair ||
+      this.recoverTries > 0 ||
       this.walk !== null ||
+      this.chairTween !== null ||
       this.pose === "walk" ||
       this.pose === "wave" ||
       this.pose === "glare" ||
       this.pose === "fidget" ||
       this.pose === "look" ||
       this.pose === "emote" ||
+      this.pose === "pull" ||
+      this.pose === "grip" ||
       this.turning !== null ||
       this.step !== null ||
       this.hold > 0
@@ -262,6 +397,10 @@ export class Controller {
     if (soles) this.lastSoles = soles;
     this.energy = Math.min(1, Math.max(0.05, this.energy - 0.008 * dt));
     if (this.quiet > 0) this.quiet = Math.max(0, this.quiet - dt);
+    if (this.chairTween) {
+      this.advanceChairTween(dt, metrics);
+      return;
+    }
     if (this.step) {
       this.advanceStep(dt);
       return;
@@ -361,6 +500,7 @@ export class Controller {
       this.turning = null;
       this.step = null;
       this.sitPlant = null;
+      this.chairTween = null;
       this.afterOneShot = null;
       const [sx, , sz] = resolveFloor(this.x, this.z, metrics);
       this.x = sx;
@@ -402,6 +542,9 @@ export class Controller {
     if (this.seated) return;
     this.lastMetrics = metrics;
     this.pendingSit = true;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.quiet = 0;
     this.turning = null;
     this.footLock = null;
@@ -419,7 +562,7 @@ export class Controller {
     this.pendingSit = true;
     this.pose = "idle";
     this.play?.(CLIP.still, false, HOLD_START);
-    this.faceThen(CHAIR_YAW, () => {
+    this.faceThen(getChairUV().yaw, () => {
       this.hold = 0.18;
       this.afterHold = () => this.beginSitDown();
     });
@@ -432,7 +575,7 @@ export class Controller {
     this.turning = null;
     this.step = null;
     this.seated = true;
-    this.yaw = CHAIR_YAW;
+    this.yaw = getChairUV().yaw;
     this.pose = "sit";
     if (this.lastSoles) {
       this.sitPlant = offsetWorld(
@@ -445,8 +588,9 @@ export class Controller {
     }
     this.play?.(CLIP.sit, false, { fade: 0 });
     this.afterOneShot = () => {
-      this.yaw = CHAIR_YAW;
+      this.yaw = getChairUV().yaw;
       this.pendingSit = false;
+      noteVisitSit();
       this.playSitIdle();
     };
   }
@@ -474,7 +618,7 @@ export class Controller {
     this.afterOneShot = () => {
       this.seated = false;
       this.step = null;
-      this.yaw = CHAIR_YAW;
+      this.yaw = getChairUV().yaw;
       if (metrics) {
         const [x, , z] = chairStandPoint(metrics);
         this.x = x;
@@ -498,6 +642,9 @@ export class Controller {
     this.afterTurn = null;
     this.hold = 0;
     this.pendingSit = false;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.quiet = 0;
     this.pose = pose;
     this.play?.(clip, false);
@@ -532,6 +679,9 @@ export class Controller {
     this.step = null;
     this.sitPlant = null;
     this.pendingSit = false;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.afterOneShot = null;
     this.afterHold = null;
     this.afterTurn = null;
@@ -558,7 +708,7 @@ export class Controller {
   private playSitIdle() {
     this.pendingSit = false;
     this.pose = "sit";
-    this.yaw = CHAIR_YAW;
+    this.yaw = getChairUV().yaw;
     this.play?.(CLIP.sitIdle, true, { fade: 0.18 });
   }
 
@@ -573,11 +723,14 @@ export class Controller {
     this.afterTurn = null;
     this.hold = 0;
     this.pendingSit = false;
+    this.pendingLamp = false;
+    this.pendingChair = false;
+    this.pendingChairTo = null;
     this.lookingAtUser = false;
     this.quiet = STILL_MIN + Math.random() * (STILL_MAX - STILL_MIN);
     if (this.seated) {
       this.pose = "sit";
-      this.yaw = CHAIR_YAW;
+      this.yaw = getChairUV().yaw;
       this.play?.(CLIP.sitStill, true, { fade: 0.18 });
       return;
     }
@@ -589,6 +742,10 @@ export class Controller {
   private stopWalk() {
     if (this.pendingSit && this.lastMetrics && this.nearStand(this.lastMetrics)) {
       this.prepareSit();
+      return;
+    }
+    if (this.pendingChair && this.pendingChairTo) {
+      this.contactThenTween(this.pendingChairTo.to, this.pendingChairTo.kind);
       return;
     }
     this.stillStand();
@@ -729,6 +886,192 @@ export class Controller {
     return randomClearFloor(metrics);
   }
 
+  private pullLamp(on: boolean, metrics: ShoeboxMetrics) {
+    if (this.seated) {
+      this.stand(() => this.pullLamp(on, metrics));
+      return;
+    }
+    this.pendingLamp = true;
+    const [x, , z] = lampPullPoint(metrics);
+    if (Math.hypot(this.x - x, this.z - z) < 0.22) {
+      this.beginPull(on);
+      return;
+    }
+    this.goTo([x, 0, z], metrics, () => this.beginPull(on));
+  }
+
+  private beginPull(on: boolean) {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.quiet = 0;
+    this.pendingLamp = true;
+    this.pose = "pull";
+    this.play?.(CLIP.pull, false, { fade: 0.12 });
+    this.hold = 0.5;
+    this.afterHold = () => {
+      yankCord();
+      setLightOn(on);
+      persistFurnitureNow();
+    };
+    this.afterOneShot = () => {
+      this.pendingLamp = false;
+      this.stillStand();
+    };
+  }
+
+  private pushChair(metrics: ShoeboxMetrics, recover = false) {
+    if (this.seated) {
+      this.stand(() => {
+        if (!this.pushChair(metrics, recover)) this.noteFail("push_chair");
+      });
+      return true;
+    }
+    const trapped = recover || this.isTrapped(metrics);
+    const next = trapped
+      ? pushAwayFromWall(metrics)
+      : (pushChairUV(metrics) ?? pushAwayFromWall(metrics));
+    if (!next) return false;
+    this.failedAt.delete("push_chair");
+    this.pendingChair = true;
+    this.pendingChairTo = { to: next, kind: "push" };
+    this.goTo(chairStandPoint(metrics), metrics, () => this.contactThenTween(next, "push"), true);
+    return true;
+  }
+
+  private moveChair(metrics: ShoeboxMetrics) {
+    if (this.seated) {
+      this.stand(() => {
+        if (!this.moveChair(metrics)) this.noteFail("move_chair");
+      });
+      return true;
+    }
+    if (this.isTrapped(metrics)) {
+      return this.pushChair(metrics, true);
+    }
+    const next = randomChairUV(metrics);
+    if (!next) return false;
+    this.failedAt.delete("move_chair");
+    this.pendingChair = true;
+    this.pendingChairTo = { to: next, kind: "move" };
+    this.goTo(chairStandPoint(metrics), metrics, () => this.contactThenTween(next, "move"), true);
+    return true;
+  }
+
+  private roomState() {
+    const c = getChairUV();
+    return `${c.u.toFixed(3)},${c.v.toFixed(3)},${c.yaw.toFixed(2)},${getLightOn() ? 1 : 0},${this.seated ? 1 : 0}`;
+  }
+
+  private noteFail(action: ActionName) {
+    this.failedAt.set(action, this.roomState());
+  }
+
+  private failedNow(_metrics: ShoeboxMetrics) {
+    const key = this.roomState();
+    const out: string[] = [];
+    for (const [action, when] of this.failedAt) {
+      if (when === key) out.push(action);
+      else this.failedAt.delete(action);
+    }
+    return out;
+  }
+
+  private contactThenTween(to: ChairUV, kind: "push" | "move") {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.pendingChair = true;
+    const facing = wrapPi(getChairUV().yaw + Math.PI);
+    this.faceThen(facing, () => this.beginGrip(to, kind));
+  }
+
+  private beginGrip(to: ChairUV, kind: "push" | "move") {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.quiet = 0;
+    this.pendingChair = true;
+    this.pose = "grip";
+    this.play?.(CLIP.grip, false, { fade: 0.12 });
+    this.afterOneShot = () => this.beginChairTween(to, kind);
+  }
+
+  private beginChairTween(to: ChairUV, kind: "push" | "move") {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.quiet = 0;
+    this.pendingChair = true;
+    this.chairTween = {
+      from: getChairUV(),
+      to,
+      t: 0,
+      duration: 1,
+      follow: true,
+    };
+    this.pose = "grip";
+    this.play?.(kind === "push" ? CLIP.chairPush : CLIP.chairMove, true, { fade: 0.08 });
+  }
+
+  private advanceChairTween(dt: number, metrics: ShoeboxMetrics) {
+    const tw = this.chairTween;
+    if (!tw) return;
+    tw.t += dt;
+    const u = smoothstep(Math.min(1, tw.t / tw.duration));
+    setChairUV(lerpChairUV(tw.from, tw.to, u), metrics);
+    if (tw.follow) {
+      const [sx, , sz] = chairStandPoint(metrics);
+      const [x, , z] = resolveFloor(sx, sz, metrics);
+      this.x = x;
+      this.z = z;
+      this.yaw = wrapPi(getChairUV().yaw + Math.PI);
+      this.y = 0;
+    }
+    if (u >= 1) {
+      this.chairTween = null;
+      persistFurnitureNow();
+      this.pendingChair = false;
+      this.pendingChairTo = null;
+      this.finishChairMove(metrics);
+    }
+  }
+
+  private finishChairMove(metrics: ShoeboxMetrics) {
+    if (!this.isTrapped(metrics)) {
+      this.recoverTries = 0;
+      this.stillStand();
+      return;
+    }
+    rememberBadChair(getChairUV());
+    persistFurnitureNow();
+    this.recoverTries += 1;
+    this.noteFail("move_chair");
+    if (this.recoverTries > 8) {
+      this.recoverTries = 0;
+      this.stillStand();
+      return;
+    }
+    this.record("push_chair");
+    if (!this.pushChair(metrics, true)) {
+      const safe = defaultChairUV(metrics);
+      this.pendingChair = true;
+      this.pendingChairTo = { to: safe, kind: "push" };
+      this.contactThenTween(safe, "push");
+    }
+  }
+
+  private isTrapped(metrics: ShoeboxMetrics) {
+    if (this.seated) return false;
+    return !canWalkAway(this.x, this.z, metrics);
+  }
+
   private keepInRoom(metrics: ShoeboxMetrics) {
     if (this.seated || this.pendingSit) return;
     const [x, , z] = resolveFloor(this.x, this.z, metrics);
@@ -737,10 +1080,31 @@ export class Controller {
     this.y = 0;
   }
 
+  private snapToSeat(metrics: ShoeboxMetrics) {
+    const [x, , z] = chairSitPoint(metrics);
+    this.x = x;
+    this.z = z;
+    this.y = 0;
+    this.yaw = getChairUV().yaw;
+    if (this.lastSoles) {
+      this.sitPlant = offsetWorld(
+        this.x,
+        this.z,
+        this.yaw,
+        this.lastSoles.x,
+        this.lastSoles.z,
+      );
+    }
+  }
+
   private record(action: ActionName | string) {
     this.lastActions.push(action);
     if (this.lastActions.length > 16) this.lastActions.shift();
   }
+}
+
+function lampPullPoint(metrics: ShoeboxMetrics): [number, number, number] {
+  return resolveFloor(metrics.width / 2, -metrics.depth / 2, metrics);
 }
 
 function wallOnly(
@@ -783,14 +1147,14 @@ function offsetRoot(plantX: number, plantZ: number, yaw: number, localX: number,
 }
 
 export function catalogObjects(metrics: ShoeboxMetrics): CatalogObject[] {
-  const chair = chairPos(metrics);
+  const live = chairLive(metrics);
   return [
     {
       id: CHAIR_ID,
       kind: "chair",
       affordances: ["sit"],
-      pos: chair,
-      yaw: CHAIR_YAW,
+      pos: [live.x, 0, live.z],
+      yaw: live.yaw,
       seatHeight: CHAIR_SEAT_HEIGHT,
     },
   ];

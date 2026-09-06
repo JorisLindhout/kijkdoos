@@ -9,7 +9,23 @@ export const ACTIONS = [
   "glare",
   "look_at_user",
   "emote",
+  "push_chair",
+  "move_chair",
+  "light_on",
+  "light_off",
 ] as const;
+
+export type Mood = "shy" | "angry" | "happy" | "calm";
+
+export type VisitSummary = {
+  visitCount: number;
+  shortStreak: number;
+  longInLastFive: number;
+  neverSatLast10: boolean;
+  pokeRateLast10: number;
+  darkHabit: boolean;
+  lastDurationsMs: number[];
+};
 
 export type ActionName = (typeof ACTIONS)[number];
 
@@ -36,6 +52,13 @@ export type Snapshot = {
     stareSeconds?: number;
     poked?: boolean;
   };
+  mood?: Mood;
+  visitCount?: number;
+  lightOn?: boolean;
+  visitSummary?: VisitSummary;
+  failedActions?: string[];
+  trappedChair?: boolean;
+  badChairPoses?: { u: number; v: number; yaw: number }[];
 };
 
 export type Plan = {

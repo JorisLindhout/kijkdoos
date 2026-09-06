@@ -1,17 +1,27 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import {
   AdditiveBlending,
   CanvasTexture,
+  DirectionalLight,
+  Group,
+  Mesh,
   SpotLight,
   Vector2,
 } from "three";
+import { lerpHex } from "../theme";
 import { usePalette } from "../useTheme";
+import { useFurniture } from "./furniture";
 import { type ShoeboxMetrics } from "./shoebox";
 
 /** Hang the filament this far below the ceiling, meters. */
 const DROP = 0.3;
 const CORD_R = 0.004;
+/**
+ * Hidden silhouette fill when the lamp is off.
+ * 0 = black frame. Raise toward 0.12 if you can barely see him.
+ */
+export const OFF_FILL = 0.035;
 
 const BULB_PROFILE = [
   [0.007, 0.112],
@@ -45,8 +55,14 @@ function useHaloMap() {
 
 export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
   const light = useRef<SpotLight>(null);
+  const fill = useRef<DirectionalLight>(null);
+  const cord = useRef<Mesh>(null);
+  const bulb = useRef<Group>(null);
+  const pull = useRef(0);
+  const seenYank = useRef(0);
   const { scene } = useThree();
   const palette = usePalette();
+  const { lightOn, yankId } = useFurniture();
   const halo = useHaloMap();
   const x = metrics.width / 2;
   const z = -metrics.depth / 2;
@@ -55,6 +71,25 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
   const cordLen = DROP - 0.14;
   /** Sit the lights above the glass so they still graze his head when he stands in front. */
   const lightY = ceiling - 0.05;
+  /** Start the shadow map below the fixture so the bulb never occludes its own pool. */
+  const shadowNear = lightY - bulbY + 0.04;
+  const fillColor = lerpHex(palette.ambient, palette.hint, 0.72);
+
+  useFrame((_, dt) => {
+    if (yankId !== seenYank.current) {
+      seenYank.current = yankId;
+      pull.current = 1;
+    }
+    if (pull.current <= 0) return;
+    pull.current = Math.max(0, pull.current - dt * 3.4);
+    const drop = pull.current * pull.current * 0.05;
+    if (bulb.current) bulb.current.position.y = bulbY - drop;
+    if (cord.current) {
+      const live = cordLen + drop;
+      cord.current.position.y = -0.02 - live / 2;
+      cord.current.scale.y = live / cordLen;
+    }
+  });
 
   useLayoutEffect(() => {
     const spot = light.current;
@@ -67,13 +102,35 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
     };
   }, [scene, x, z]);
 
+  useLayoutEffect(() => {
+    const dir = fill.current;
+    if (!dir) return;
+    dir.target.position.set(x, 0.35, z);
+    scene.add(dir.target);
+    dir.target.updateMatrixWorld();
+    return () => {
+      scene.remove(dir.target);
+    };
+  }, [scene, x, z, lightOn]);
+
   return (
     <group>
+      <directionalLight
+        ref={fill}
+        position={[x, metrics.height * 0.58, metrics.camDist * 0.7]}
+        color={fillColor}
+        intensity={lightOn ? 0 : OFF_FILL * 2}
+      />
+      <hemisphereLight
+        color={fillColor}
+        groundColor={palette.void}
+        intensity={lightOn ? 0 : OFF_FILL * 0.7}
+      />
       <spotLight
         ref={light}
         position={[x, lightY, z]}
         color={palette.lamp.light}
-        intensity={palette.lamp.intensity}
+        intensity={lightOn ? palette.lamp.intensity : 0}
         distance={metrics.height * 3.2}
         decay={2}
         angle={0.9}
@@ -82,18 +139,18 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
         shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.00022}
         shadow-normalBias={0.018}
-        shadow-camera-near={0.06}
+        shadow-camera-near={shadowNear}
         shadow-camera-far={metrics.height * 2.2}
       />
       <pointLight
         position={[x, lightY, z]}
         color={palette.lamp.halo}
-        intensity={palette.lamp.haloIntensity}
+        intensity={lightOn ? palette.lamp.haloIntensity : 0}
         distance={0.55}
         decay={2}
       />
       <group position={[x, ceiling, z]}>
-        <mesh position={[0, -0.006, 0]} castShadow>
+        <mesh position={[0, -0.006, 0]}>
           <cylinderGeometry args={[0.036, 0.04, 0.012, 24]} />
           <meshStandardMaterial color="#1a1c20" roughness={0.7} metalness={0.2} />
         </mesh>
@@ -101,13 +158,13 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
           <cylinderGeometry args={[0.01, 0.01, 0.01, 12]} />
           <meshStandardMaterial color="#2a241c" roughness={0.45} metalness={0.35} />
         </mesh>
-        <mesh position={[0, -0.02 - cordLen / 2, 0]}>
+        <mesh ref={cord} position={[0, -0.02 - cordLen / 2, 0]}>
           <cylinderGeometry args={[CORD_R, CORD_R, cordLen, 8]} />
           <meshStandardMaterial color="#d8d2c8" roughness={0.7} metalness={0.05} />
         </mesh>
       </group>
-      <group position={[x, bulbY, z]}>
-        <mesh position={[0, 0.128, 0]} castShadow>
+      <group ref={bulb} position={[x, bulbY, z]}>
+        <mesh position={[0, 0.128, 0]}>
           <cylinderGeometry args={[0.017, 0.019, 0.038, 20]} />
           <meshStandardMaterial color="#5c3d28" roughness={0.38} metalness={0.62} />
         </mesh>
@@ -118,9 +175,9 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
         <mesh>
           <latheGeometry args={[BULB_PROFILE, 32]} />
           <meshStandardMaterial
-            color={palette.lamp.bulb}
+            color={lightOn ? palette.lamp.bulb : "#2a2420"}
             emissive={palette.lamp.glow}
-            emissiveIntensity={palette.lamp.emissive * 1.35}
+            emissiveIntensity={lightOn ? palette.lamp.emissive * 1.35 : 0}
             roughness={0.18}
             metalness={0.02}
             toneMapped={false}
@@ -132,7 +189,7 @@ export function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
               map={halo}
               color={palette.lamp.halo}
               transparent
-              opacity={0.55}
+              opacity={lightOn ? 0.55 : 0}
               depthWrite={false}
               blending={AdditiveBlending}
             />
