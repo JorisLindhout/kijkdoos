@@ -1,6 +1,6 @@
 import type { Plan, Snapshot } from "./schema";
 
-const REARRANGE = new Set(["push_chair", "move_chair"]);
+const REARRANGE = new Set(["push_chair", "move_chair", "kick_chair"]);
 const LAMP = new Set(["light_on", "light_off"]);
 
 export function dummyThink(snapshot: Snapshot): Plan {
@@ -19,6 +19,8 @@ export function dummyThink(snapshot: Snapshot): Plan {
   const angry = mood === "angry";
   const happy = mood === "happy";
   const angryStreak = (summary?.shortStreak ?? 0) >= 3;
+  const failCount = snapshot.failCount ?? 0;
+  const peakAnger = (angry && angryStreak) || failCount >= 5;
   const darkHabit = summary?.darkHabit ?? false;
   const neverSat = summary?.neverSatLast10 ?? false;
   const pokedOften = (summary?.pokeRateLast10 ?? 0) >= 3;
@@ -31,9 +33,14 @@ export function dummyThink(snapshot: Snapshot): Plan {
     return { action: "glare" };
   }
 
-  if (standing && snapshot.trappedChair) {
+  if (standing && (snapshot.trappedChair || snapshot.backBlocked)) {
+    if (!skipped("kick_chair")) return { action: "kick_chair" };
     if (!skipped("push_chair")) return { action: "push_chair" };
     return { action: "still" };
+  }
+
+  if (standing && peakAnger && !skipped("kick_chair") && !recent("kick_chair") && Math.random() < 0.04) {
+    return { action: "kick_chair" };
   }
 
   if (standing && !lampRecent) {
@@ -71,9 +78,9 @@ export function dummyThink(snapshot: Snapshot): Plan {
 
   if (pose === "idle" || pose === "still" || pose === "look") {
     const pick = Math.random();
-    const glareBoost = pokedOften || angry || angryStreak ? 0.08 : 0;
+    const glareBoost = pokedOften || angry || angryStreak || failCount >= 3 ? 0.08 : 0;
     const waveCut = shy || pokedOften ? 0 : 0.03;
-    const stillCut = neverSat ? 0.74 : angry || angryStreak ? 0.72 : 0.65;
+    const stillCut = neverSat ? 0.74 : angry || angryStreak || failCount >= 3 ? 0.72 : 0.65;
     if (pick < stillCut) return { action: "still" };
     if (pick < stillCut + 0.1) return { action: "fidget" };
     if (pick < stillCut + 0.18) return { action: "look_at_user" };

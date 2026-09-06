@@ -39,6 +39,7 @@ export type LiveVisit = {
   poked: boolean;
   maxStareS: number;
   sat: boolean;
+  failCount: number;
 };
 
 let live: LiveVisit | null = null;
@@ -119,6 +120,7 @@ export function hydrateVisit(metrics: ShoeboxMetrics): { mood: Mood; summary: Vi
     poked: false,
     maxStareS: 0,
     sat: false,
+    failCount: 0,
   };
   return { mood, summary: summarizeLog(save.log) };
 }
@@ -137,6 +139,21 @@ export function noteVisitStare(seconds: number) {
 
 export function getLiveMood(): Mood {
   return live?.mood ?? "shy";
+}
+
+export function getFailCount() {
+  return live?.failCount ?? 0;
+}
+
+export function isPeakAnger() {
+  if (getFailCount() >= 5) return true;
+  return getLiveMood() === "angry" && getVisitSummary().shortStreak >= 3;
+}
+
+export function noteVisitFail() {
+  if (!live) return;
+  live.failCount += 1;
+  if (live.failCount >= 3) live.mood = "angry";
 }
 
 export function getVisitSummary(): VisitSummary {

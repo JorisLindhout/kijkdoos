@@ -5,7 +5,7 @@ export const ACTOR_RADIUS = 0.18;
 export const WALL_PAD = 0.34;
 const CHAIR_PAD = 0.04;
 /** Keep this much air between the body and the chair when leaving. */
-const CHAIR_LEAVE_GAP = 0.1;
+const CHAIR_LEAVE_GAP = 0.24;
 /** Walk to this point first so the approach is from the open floor. */
 const APPROACH_GAP = 0.45;
 
@@ -41,11 +41,15 @@ function chairHalf() {
   };
 }
 
-function alongChair(metrics: ShoeboxMetrics, gap: number): [number, number, number] {
+function alongChair(
+  metrics: ShoeboxMetrics,
+  gap: number,
+  sign = 1,
+): [number, number, number] {
   const { x: cx, z: cz, yaw } = chairLive(metrics);
   const f = chairFwd(yaw);
   const d = CHAIR_SIZE[2] / 2 + gap;
-  const walls = clampWalls(cx + f.x * d, cz + f.z * d, metrics);
+  const walls = clampWalls(cx + sign * f.x * d, cz + sign * f.z * d, metrics);
   return [walls.x, 0, walls.z];
 }
 
@@ -53,8 +57,78 @@ export function chairStandPoint(metrics: ShoeboxMetrics): [number, number, numbe
   return alongChair(metrics, CHAIR_STAND_GAP);
 }
 
+export function chairBackPoint(metrics: ShoeboxMetrics): [number, number, number] {
+  return alongChair(metrics, CHAIR_STAND_GAP, -1);
+}
+
 export function chairApproachPoint(metrics: ShoeboxMetrics): [number, number, number] {
   return alongChair(metrics, APPROACH_GAP);
+}
+
+export function backReachable(metrics: ShoeboxMetrics): boolean {
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
+  const f = chairFwd(yaw);
+  const d = CHAIR_SIZE[2] / 2 + CHAIR_STAND_GAP;
+  const raw = { x: cx - f.x * d, z: cz - f.z * d };
+  const [bx, , bz] = chairBackPoint(metrics);
+  if (overlapsChair(bx, bz, metrics)) return false;
+  const standDist = Math.hypot(bx - cx, bz - cz);
+  if (standDist < CHAIR_SIZE[2] / 2 + ACTOR_RADIUS) return false;
+  if (Math.hypot(bx - raw.x, bz - raw.z) > 0.12 && standDist < d - 0.1) return false;
+  return canWalkAway(bx, bz, metrics);
+}
+
+export function chairKickPoint(metrics: ShoeboxMetrics): [number, number, number] {
+  const { x: cx, z: cz, yaw } = chairLive(metrics);
+  const f = chairFwd(yaw);
+  const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+  const inwardH = wallInwardHeading(cx, cz, metrics);
+  const inward = { x: Math.sin(inwardH), z: Math.cos(inwardH) };
+  const toward = { x: -inward.x, z: -inward.z };
+  const d = CHAIR_SIZE[2] / 2 + CHAIR_STAND_GAP;
+  const faces = [
+    { x: cx + f.x * d, z: cz + f.z * d, open: dot(f, inward), wall: dot(f, toward) },
+    {
+      x: cx - f.x * d,
+      z: cz - f.z * d,
+      open: dot({ x: -f.x, z: -f.z }, inward),
+      wall: dot({ x: -f.x, z: -f.z }, toward),
+    },
+    { x: cx + right.x * d, z: cz + right.z * d, open: dot(right, inward), wall: dot(right, toward) },
+    {
+      x: cx - right.x * d,
+      z: cz - right.z * d,
+      open: dot({ x: -right.x, z: -right.z }, inward),
+      wall: dot({ x: -right.x, z: -right.z }, toward),
+    },
+  ];
+  const wallFace = faces.reduce((a, b) => (a.wall > b.wall ? a : b));
+  const candidates = faces
+    .filter((face) => face !== wallFace)
+    .sort((a, b) => b.open - a.open);
+  for (const face of candidates) {
+    const walls = clampWalls(face.x, face.z, metrics);
+    if (overlapsChair(walls.x, walls.z, metrics)) continue;
+    if (Math.hypot(walls.x - face.x, walls.z - face.z) > 0.18) continue;
+    return [walls.x, 0, walls.z];
+  }
+  return chairStandPoint(metrics);
+}
+
+function wallInwardHeading(x: number, z: number, metrics: ShoeboxMetrics) {
+  const left = x;
+  const right = metrics.width - x;
+  const opening = -z;
+  const back = metrics.depth + z;
+  const nearest = Math.min(left, right, opening, back);
+  if (nearest === left) return Math.PI / 2;
+  if (nearest === right) return -Math.PI / 2;
+  if (nearest === opening) return Math.PI;
+  return 0;
+}
+
+function dot(a: FloorXZ, b: FloorXZ) {
+  return a.x * b.x + a.z * b.z;
 }
 
 export function chairBody(metrics: ShoeboxMetrics): Obstacle {
@@ -137,6 +211,56 @@ export function pushOutOfChair(x: number, z: number, metrics: ShoeboxMetrics): F
   if (nearest === back) return chairWorld(lx, -hz - pad, metrics);
   if (nearest === left) return chairWorld(-hx - pad, lz, metrics);
   return chairWorld(hx + pad, lz, metrics);
+}
+
+export function behindChair(x: number, z: number, metrics: ShoeboxMetrics): boolean {
+  return chairLocal(x, z, metrics).lz < 0;
+}
+
+export function onChairBack(x: number, z: number, metrics: ShoeboxMetrics): boolean {
+  const { lx, lz } = chairLocal(x, z, metrics);
+  const { hx, hz } = chairHalf();
+  return lz <= -hz * 0.15 && Math.abs(lx) <= hx + ACTOR_RADIUS + 0.16;
+}
+
+export function resolveBehindChair(
+  x: number,
+  z: number,
+  metrics: ShoeboxMetrics,
+): [number, number, number] {
+  const walls = clampWalls(x, z, metrics);
+  if (!insideChair(walls.x, walls.z, metrics) && !overlapsChair(walls.x, walls.z, metrics)) {
+    return [walls.x, 0, walls.z];
+  }
+  const { lx } = chairLocal(walls.x, walls.z, metrics);
+  const { hx, hz } = chairHalf();
+  const gap = CHAIR_LEAVE_GAP;
+  const slots = [
+    Math.min(hx, Math.max(-hx, lx)),
+    0,
+    -hx * 0.55,
+    hx * 0.55,
+    -hx,
+    hx,
+  ];
+  for (const nx of slots) {
+    const out = chairWorld(nx, -hz - gap, metrics);
+    const again = clampWalls(out.x, out.z, metrics);
+    if (!overlapsChair(again.x, again.z, metrics) && behindChair(again.x, again.z, metrics)) {
+      return [again.x, 0, again.z];
+    }
+  }
+  const sides = [
+    chairWorld(-hx - gap, -hz * 0.35, metrics),
+    chairWorld(hx + gap, -hz * 0.35, metrics),
+  ];
+  for (const side of sides) {
+    const again = clampWalls(side.x, side.z, metrics);
+    if (!overlapsChair(again.x, again.z, metrics)) return [again.x, 0, again.z];
+  }
+  const fallback = chairWorld(0, -hz - gap, metrics);
+  const clamped = clampWalls(fallback.x, fallback.z, metrics);
+  return [clamped.x, 0, clamped.z];
 }
 
 export function resolveFloor(
@@ -230,6 +354,7 @@ export function routeAroundChair(
   to: FloorXZ,
   metrics: ShoeboxMetrics,
   preferFront = false,
+  preferBack = false,
 ): FloorXZ[] {
   if (preferFront) {
     const [ax, , az] = chairApproachPoint(metrics);
@@ -279,13 +404,23 @@ export function routeAroundChair(
       hops.some((p) => p !== to && (p.x - cx) * f.x + (p.z - cz) * f.z < 0)
         ? 4
         : 0;
-    return { hops, cost: pathLen(from, hops) + frontBias };
+    const backBias =
+      preferBack &&
+      hops.some((p) => p !== to && (p.x - cx) * f.x + (p.z - cz) * f.z > 0)
+        ? 4
+        : 0;
+    return { hops, cost: pathLen(from, hops) + frontBias + backBias };
   });
   scored.sort((a, b) => a.cost - b.cost);
 
   return scored[0].hops
     .map((p, i, all) => {
-      if (preferFront && i === all.length - 1) return p;
+      const last = i === all.length - 1;
+      if (preferFront && last) return p;
+      if (preferBack && (last || behindChair(p.x, p.z, metrics))) {
+        const [x, , z] = resolveBehindChair(p.x, p.z, metrics);
+        return { x, z };
+      }
       const [x, , z] = resolveFloor(p.x, p.z, metrics);
       return { x, z };
     })

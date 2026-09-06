@@ -125,12 +125,12 @@ const CHAIR_GRIP: Pose = {
   ...STAND,
   rot: {
     ...STAND.rot,
-    torso: [18 * D, 0, 0],
-    head: [10 * D, 0, 0],
-    upperarm_l: [58 * D, 0, 22 * D],
-    lowerarm_l: [-28 * D, 0, 0],
-    upperarm_r: [58 * D, 0, -22 * D],
-    lowerarm_r: [-28 * D, 0, 0],
+    torso: [12 * D, 0, 0],
+    head: [6 * D, 0, 0],
+    upperarm_l: [-28 * D, 4 * D, 12 * D],
+    lowerarm_l: [-72 * D, 0, 8 * D],
+    upperarm_r: [-28 * D, -4 * D, -12 * D],
+    lowerarm_r: [-72 * D, 0, -8 * D],
   },
 };
 
@@ -138,10 +138,12 @@ const CHAIR_PUSH: Pose = {
   ...CHAIR_GRIP,
   rot: {
     ...CHAIR_GRIP.rot,
-    torso: [28 * D, 0, 0],
-    head: [14 * D, 0, 0],
-    upperarm_l: [64 * D, 0, 18 * D],
-    upperarm_r: [64 * D, 0, -18 * D],
+    torso: [18 * D, 0, 0],
+    head: [8 * D, 0, 0],
+    upperarm_l: [-34 * D, 2 * D, 10 * D],
+    lowerarm_l: [-78 * D, 0, 6 * D],
+    upperarm_r: [-34 * D, -2 * D, -10 * D],
+    lowerarm_r: [-78 * D, 0, -6 * D],
   },
 };
 
@@ -149,10 +151,44 @@ const CHAIR_TWIST: Pose = {
   ...CHAIR_GRIP,
   rot: {
     ...CHAIR_GRIP.rot,
-    torso: [16 * D, 16 * D, 0],
-    head: [8 * D, 10 * D, 0],
-    upperarm_l: [52 * D, 8 * D, 26 * D],
-    upperarm_r: [62 * D, -6 * D, -18 * D],
+    torso: [14 * D, 10 * D, 0],
+    head: [6 * D, 8 * D, 0],
+    upperarm_l: [-22 * D, 8 * D, 14 * D],
+    lowerarm_l: [-68 * D, 0, 10 * D],
+    upperarm_r: [-36 * D, -6 * D, -8 * D],
+    lowerarm_r: [-80 * D, 0, -4 * D],
+  },
+};
+
+const KICK_WIND: Pose = {
+  ...STAND,
+  hipsY: HIP_HEIGHT - 0.02,
+  rot: {
+    ...STAND.rot,
+    torso: [6 * D, -8 * D, 4 * D],
+    head: [4 * D, -6 * D, 0],
+    thigh_r: [-22 * D, 0, 4 * D],
+    shin_r: [18 * D, 0, 0],
+    foot_r: [4 * D, 0, 0],
+    thigh_l: [6 * D, 0, -4 * D],
+    upperarm_l: [8 * D, 0, 18 * D],
+    upperarm_r: [-10 * D, 0, -16 * D],
+  },
+};
+
+const KICK_HIT: Pose = {
+  ...STAND,
+  hipsY: HIP_HEIGHT - 0.01,
+  rot: {
+    ...STAND.rot,
+    torso: [10 * D, 8 * D, -4 * D],
+    head: [6 * D, 8 * D, 0],
+    thigh_r: [-72 * D, 0, 6 * D],
+    shin_r: [12 * D, 0, 0],
+    foot_r: [8 * D, 0, 0],
+    thigh_l: [8 * D, 0, -5 * D],
+    upperarm_l: [-12 * D, 0, 14 * D],
+    upperarm_r: [16 * D, 0, -22 * D],
   },
 };
 
@@ -512,10 +548,10 @@ export const CLIPS: Record<string, ClipDef> = {
   },
   Chair_Grip: {
     kind: "keys",
-    duration: 0.42,
+    duration: 0.55,
     keys: keys([
       [0, STAND],
-      [0.42, CHAIR_GRIP],
+      [0.55, CHAIR_GRIP],
     ]),
   },
   Chair_Push: {
@@ -534,6 +570,17 @@ export const CLIPS: Record<string, ClipDef> = {
       [0, CHAIR_GRIP],
       [0.45, CHAIR_TWIST],
       [0.9, CHAIR_GRIP],
+    ]),
+  },
+  Chair_Kick: {
+    kind: "keys",
+    duration: 0.72,
+    keys: keys([
+      [0, STAND],
+      [0.2, KICK_WIND],
+      [0.34, KICK_HIT],
+      [0.5, KICK_WIND],
+      [0.72, STAND],
     ]),
   },
   Glaring: {

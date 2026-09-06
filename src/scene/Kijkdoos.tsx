@@ -1,5 +1,6 @@
 import { Canvas, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PCFShadowMap } from "three";
 import { ACTOR_LOGIC, Controller, THOUGHT_CAP } from "../actor/Controller";
 import { requestPlan } from "../brain/client";
 import { DEV, logDevCheatsheet } from "../dev";
@@ -58,10 +59,11 @@ function Scene() {
       }
       if (key === "p") c.request({ action: "push_chair" }, metrics);
       if (key === "m") c.request({ action: "move_chair" }, metrics);
+      if (key === "k") c.request({ action: "kick_chair" }, metrics);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [metrics]);
+  }, [c, metrics]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -186,7 +188,7 @@ export function Kijkdoos() {
       <Canvas
         gl={{ antialias: true, preserveDrawingBuffer: true }}
         dpr={[1, 2]}
-        shadows
+        shadows={{ type: PCFShadowMap }}
         camera={{ fov: 55, near: 0.05, far: 40 }}
         onCreated={() => setCanvasReady(true)}
       >

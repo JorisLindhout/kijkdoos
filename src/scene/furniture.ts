@@ -167,7 +167,9 @@ export function randomChairUV(metrics: ShoeboxMetrics): ChairUV | null {
     );
     const [x, , z] = floorPoint(metrics, next.u, next.v);
     if (Math.hypot(x - live.x, z - live.z) <= 0.28) continue;
-    if (isBadChair(next) || poseBlocksLeave(next, metrics)) continue;
+    if (isBadChair(next) || poseBlocksLeave(next, metrics) || poseBlocksBack(next, metrics)) {
+      continue;
+    }
     return next;
   }
   return null;
@@ -201,7 +203,10 @@ export function pushChairUV(
       seen.add(key);
       const toward =
         inward == null ? moved : moved * Math.cos(wrapPi(heading - inward));
-      if (!opts?.allowTrap && (isBadChair(next) || poseBlocksLeave(next, metrics))) {
+      if (
+        !opts?.allowTrap &&
+        (isBadChair(next) || poseBlocksLeave(next, metrics) || poseBlocksBack(next, metrics))
+      ) {
         if (!fallback || toward > fallback.score) fallback = { uv: next, score: toward };
         continue;
       }
@@ -212,14 +217,14 @@ export function pushChairUV(
   return null;
 }
 
-export function pushAwayFromWall(metrics: ShoeboxMetrics): ChairUV | null {
+export function pushAwayFromWall(metrics: ShoeboxMetrics, dist?: number): ChairUV | null {
   const live = chairLive(metrics);
   const inward = wallInwardHeading(live.x, live.z, metrics);
   const center = Math.atan2(metrics.width / 2 - live.x, -metrics.depth / 2 - live.z);
   const prefer = [inward, center, inward + 0.45, inward - 0.45];
-  const legal = pushChairUV(metrics, { prefer });
+  const legal = pushChairUV(metrics, { prefer, dist });
   if (legal) return legal;
-  const forced = pushChairUV(metrics, { prefer, allowTrap: true });
+  const forced = pushChairUV(metrics, { prefer, dist, allowTrap: true });
   if (forced) return forced;
   const { u, v } = floorUV(metrics, metrics.width / 2, -metrics.depth / 2);
   const safe = clampChairUV({ u, v, yaw: live.yaw }, metrics);
@@ -241,11 +246,19 @@ function wallInwardHeading(x: number, z: number, metrics: ShoeboxMetrics) {
 }
 
 function poseBlocksLeave(uv: ChairUV, metrics: ShoeboxMetrics) {
+  return poseBlocksContact(uv, metrics, 1);
+}
+
+function poseBlocksBack(uv: ChairUV, metrics: ShoeboxMetrics) {
+  return poseBlocksContact(uv, metrics, -1);
+}
+
+function poseBlocksContact(uv: ChairUV, metrics: ShoeboxMetrics, sign: 1 | -1) {
   const pose = clampChairUV(uv, metrics);
   const [cx, , cz] = floorPoint(metrics, pose.u, pose.v);
   const f = chairFwd(pose.yaw);
   const d = CHAIR_SIZE[2] / 2 + CHAIR_STAND_GAP;
-  const raw = { x: cx + f.x * d, z: cz + f.z * d };
+  const raw = { x: cx + sign * f.x * d, z: cz + sign * f.z * d };
   const stand = clampRoom(raw.x, raw.z, metrics);
   if (pointHitsChair(pose, stand.x, stand.z, metrics, ACTOR_R)) return true;
   const standDist = Math.hypot(stand.x - cx, stand.z - cz);

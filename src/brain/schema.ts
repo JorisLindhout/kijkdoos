@@ -11,6 +11,7 @@ export const ACTIONS = [
   "emote",
   "push_chair",
   "move_chair",
+  "kick_chair",
   "light_on",
   "light_off",
 ] as const;
@@ -58,6 +59,8 @@ export type Snapshot = {
   visitSummary?: VisitSummary;
   failedActions?: string[];
   trappedChair?: boolean;
+  backBlocked?: boolean;
+  failCount?: number;
   badChairPoses?: { u: number; v: number; yaw: number }[];
 };
 

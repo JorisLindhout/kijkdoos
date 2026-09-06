@@ -20,6 +20,7 @@ export const DEV_KEYS = [
   ["O", "toggle lamp"],
   ["P", "push chair"],
   ["M", "move chair"],
+  ["K", "kick chair"],
 ] as const;
 
 export const DEV_QUERY = [

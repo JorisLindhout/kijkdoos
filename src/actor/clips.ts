@@ -19,6 +19,7 @@ export const CLIP = {
   grip: "Chair_Grip",
   chairPush: "Chair_Push",
   chairMove: "Chair_Move",
+  chairKick: "Chair_Kick",
   turnLeft: "Turn_Left",
   turnRight: "Turn_Right",
 } as const;
@@ -57,6 +58,8 @@ export function clipForAction(action: ActionName): { clip: ClipId; loop: boolean
       return { clip: CLIP.chairPush, loop: true };
     case "move_chair":
       return { clip: CLIP.chairMove, loop: true };
+    case "kick_chair":
+      return { clip: CLIP.chairKick, loop: false };
     default:
       return null;
   }
