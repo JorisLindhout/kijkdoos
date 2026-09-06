@@ -1,7 +1,10 @@
 import type { ActionName, CatalogObject, Plan, Snapshot } from "../brain/schema";
 import { CLIP, HOLD_END, HOLD_START } from "./clips";
+import { BODY } from "./blockBody";
+import { STAND_DURATION, TURN_DURATION } from "./poses";
 import {
   chairStandPoint,
+  clampWalls,
   randomClearFloor,
   resolveFloor,
   routeAroundChair,
@@ -9,10 +12,18 @@ import {
   type FloorXZ,
 } from "../scene/nav";
 import { floorPoint, type ShoeboxMetrics } from "../scene/shoebox";
-import { CHAIR_ID, CHAIR_SEAT_HEIGHT, CHAIR_SIZE, CHAIR_U, CHAIR_V } from "../scene/ChairBox";
+import {
+  CHAIR_ID,
+  CHAIR_SEAT_HEIGHT,
+  CHAIR_YAW,
+  chairPos,
+} from "../scene/ChairBox";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 27;
+export const ACTOR_LOGIC = 50;
+const TURN_THRESH = Math.PI * 0.55;
+const YAW_FOLLOW = 9;
+const PIVOT_X = BODY.torso.w / 2 - BODY.thigh.w / 2;
 
 export type WalkContact = {
   side: "l" | "r";
@@ -20,7 +31,7 @@ export type WalkContact = {
   z: number;
 };
 
-export type ActorPose = "idle" | "walk" | "sit" | "wave" | "glare";
+export type ActorPose = "idle" | "walk" | "sit" | "wave" | "glare" | "turn";
 
 export type PlayOpts = {
   reverse?: boolean;
@@ -33,7 +44,28 @@ export type PlayClip = (clip: string, loop: boolean, opts?: PlayOpts) => void;
 type Walk = {
   x: number;
   z: number;
-  then?: () => void;
+  onArrive?: () => void;
+};
+
+type Step = {
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+  delay: number;
+  duration: number;
+  t: number;
+};
+
+type Turn = {
+  from: number;
+  to: number;
+  duration: number;
+  t: number;
+  plantX: number;
+  plantZ: number;
+  localX: number;
+  localZ: number;
 };
 
 export class Controller {
@@ -55,8 +87,17 @@ export class Controller {
   private walk: Walk | null = null;
   private path: FloorXZ[] = [];
   private footLock: { side: "l" | "r"; x: number; z: number } | null = null;
+  private turning: Turn | null = null;
+  private step: Step | null = null;
+  private sitPlant: FloorXZ | null = null;
+  private lastSoles: FloorXZ | null = null;
   private afterOneShot: (() => void) | null = null;
+  private pendingSit = false;
+  private lastMetrics: ShoeboxMetrics | null = null;
   private started = false;
+  private hold = 0;
+  private afterHold: (() => void) | null = null;
+  private afterTurn: (() => void) | null = null;
 
   start(metrics: ShoeboxMetrics) {
     if (this.started) {
@@ -77,6 +118,14 @@ export class Controller {
     this.walk = null;
     this.path = [];
     this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.sitPlant = null;
+    this.afterOneShot = null;
+    this.afterHold = null;
+    this.afterTurn = null;
+    this.hold = 0;
+    this.pendingSit = false;
     this.pose = "idle";
     this.play?.(CLIP.idle, false, HOLD_START);
   }
@@ -111,6 +160,7 @@ export class Controller {
     this.record(plan.action);
     switch (plan.action) {
       case "walk_to":
+        this.pendingSit = false;
         this.goTo(this.walkTarget(plan, metrics), metrics);
         break;
       case "sit":
@@ -137,6 +187,7 @@ export class Controller {
 
   clickFloor(point: { x: number; z: number }, metrics: ShoeboxMetrics) {
     this.lookingAtUser = false;
+    this.pendingSit = false;
     this.goTo([point.x, 0, point.z], metrics);
     this.record("walk_to");
   }
@@ -167,11 +218,45 @@ export class Controller {
   }
 
   walkBusy() {
-    return this.walk !== null || this.pose === "walk";
+    return (
+      this.seated ||
+      this.pendingSit ||
+      this.walk !== null ||
+      this.pose === "walk" ||
+      this.turning !== null ||
+      this.step !== null ||
+      this.sitPlant !== null ||
+      this.hold > 0
+    );
   }
 
-  tick(dt: number, metrics: ShoeboxMetrics, contact?: WalkContact | null) {
+  tick(dt: number, metrics: ShoeboxMetrics, contact?: WalkContact | null, soles?: FloorXZ | null) {
+    this.lastMetrics = metrics;
+    if (soles) this.lastSoles = soles;
     this.energy = Math.min(1, Math.max(0.05, this.energy - 0.008 * dt));
+    if (this.step) {
+      this.advanceStep(dt);
+      return;
+    }
+    if (this.hold > 0) {
+      this.hold -= dt;
+      if (this.hold <= 0) {
+        this.hold = 0;
+        const next = this.afterHold;
+        this.afterHold = null;
+        next?.();
+      }
+      return;
+    }
+    if (this.sitPlant && this.lastSoles) {
+      this.anchorToPlant(this.sitPlant, this.lastSoles);
+      return;
+    }
+    if (this.turning) {
+      this.advanceTurn(dt);
+      if (!this.pendingSit) this.keepInRoom(metrics);
+      return;
+    }
     if (!this.walk) return;
     const dx = this.walk.x - this.x;
     const dz = this.walk.z - this.z;
@@ -181,29 +266,36 @@ export class Controller {
       this.z = this.walk.z;
       const nextHop = this.path.shift();
       if (nextHop) {
-        this.walk = { x: nextHop.x, z: nextHop.z, then: this.walk.then };
+        this.walk = { x: nextHop.x, z: nextHop.z, onArrive: this.walk.onArrive };
         this.footLock = null;
+        this.maybeTurn();
         return;
       }
-      const then = this.walk.then;
+      const onArrive = this.walk.onArrive;
       this.walk = null;
       this.footLock = null;
-      if (then) then();
+      if (onArrive) onArrive();
       else this.stillStand();
       return;
     }
-    this.yaw = Math.atan2(dx, dz);
+    if (this.maybeTurn()) return;
+    this.yaw = wrapPi(
+      lerpAngle(this.yaw, Math.atan2(dx, dz), 1 - Math.exp(-YAW_FOLLOW * dt)),
+    );
     const prevX = this.x;
     const prevZ = this.z;
     if (contact) this.stepFromFoot(contact);
     else return;
-    if (stepHitsChair(prevX, prevZ, this.x, this.z, metrics)) {
+    const toSit = Boolean(this.walk.onArrive);
+    if (!toSit && stepHitsChair(prevX, prevZ, this.x, this.z, metrics)) {
       this.x = prevX;
       this.z = prevZ;
-      this.stillStand();
+      this.stopWalk();
       return;
     }
-    const [rx, , rz] = resolveFloor(this.x, this.z, metrics);
+    const [rx, , rz] = toSit
+      ? wallOnly(this.x, this.z, metrics)
+      : resolveFloor(this.x, this.z, metrics);
     const intended = Math.hypot(this.x - prevX, this.z - prevZ);
     const along =
       intended > 1e-6
@@ -212,7 +304,7 @@ export class Controller {
     this.x = rx;
     this.z = rz;
     this.y = 0;
-    if (intended > 0.003 && along < 0.0015) this.stillStand();
+    if (intended > 0.003 && along < 0.0015) this.stopWalk();
   }
 
   private stepFromFoot(contact: WalkContact) {
@@ -231,34 +323,47 @@ export class Controller {
   private goTo(
     point: [number, number, number],
     metrics: ShoeboxMetrics,
-    then?: () => void,
+    onArrive?: () => void,
     preferFront = false,
   ) {
     const beginWalk = () => {
       this.seated = false;
       this.y = 0;
+      this.turning = null;
+      this.step = null;
+      this.sitPlant = null;
+      this.afterOneShot = null;
       const [sx, , sz] = resolveFloor(this.x, this.z, metrics);
       this.x = sx;
       this.z = sz;
-      const [x, , z] = resolveFloor(point[0], point[2], metrics);
+      let x = point[0];
+      let z = point[2];
+      if (!onArrive) {
+        const resolved = resolveFloor(x, z, metrics);
+        x = resolved[0];
+        z = resolved[2];
+      } else {
+        const walls = clampWalls(x, z, metrics);
+        x = walls.x;
+        z = walls.z;
+      }
       const hops = routeAroundChair({ x: this.x, z: this.z }, { x, z }, metrics, preferFront);
       const first = hops.shift();
       this.footLock = null;
       this.path = hops;
-      this.walk = first ? { x: first.x, z: first.z, then } : { x, z, then };
+      this.walk = first ? { x: first.x, z: first.z, onArrive } : { x, z, onArrive };
       if (Math.hypot(this.walk.x - this.x, this.walk.z - this.z) < 0.05 && this.path.length === 0) {
         this.walk = null;
-        if (then) then();
+        if (onArrive) onArrive();
         else this.stillStand();
         return;
       }
       this.pose = "walk";
+      if (this.maybeTurn()) return;
       this.play?.(CLIP.walk, true, { fade: 0 });
     };
     if (this.seated) {
-      this.play?.(CLIP.stand, false);
-      this.seated = false;
-      this.afterOneShot = beginWalk;
+      this.stand(beginWalk);
       return;
     }
     beginWalk();
@@ -266,28 +371,87 @@ export class Controller {
 
   private sit(metrics: ShoeboxMetrics) {
     if (this.seated) return;
-    this.goTo(
-      chairStandPoint(metrics),
-      metrics,
-      () => {
-        const [cx, , cz] = floorPoint(metrics, CHAIR_U, CHAIR_V);
-        this.x = cx;
-        this.z = cz + CHAIR_SIZE[2] * 0.28;
-        this.yaw = 0;
-        this.seated = true;
-        this.pose = "sit";
-        this.play?.(CLIP.sit, false);
-      },
-      true,
-    );
+    this.lastMetrics = metrics;
+    this.pendingSit = true;
+    this.turning = null;
+    this.footLock = null;
+    if (this.nearStand(metrics)) {
+      this.prepareSit();
+      return;
+    }
+    this.goTo(chairStandPoint(metrics), metrics, () => this.prepareSit(), true);
   }
 
-  private stand() {
-    if (!this.seated) return;
-    this.play?.(CLIP.stand, false);
-    this.seated = false;
+  private prepareSit() {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.pendingSit = true;
     this.pose = "idle";
-    this.afterOneShot = () => this.stillStand();
+    this.play?.(CLIP.idle, false, HOLD_START);
+    this.faceThen(CHAIR_YAW, () => {
+      this.hold = 0.18;
+      this.afterHold = () => this.beginSitDown();
+    });
+  }
+
+  private beginSitDown() {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.pendingSit = false;
+    this.seated = true;
+    this.yaw = CHAIR_YAW;
+    this.pose = "sit";
+    if (this.lastSoles) {
+      this.sitPlant = offsetWorld(
+        this.x,
+        this.z,
+        this.yaw,
+        this.lastSoles.x,
+        this.lastSoles.z,
+      );
+    }
+    this.play?.(CLIP.sit, false, { fade: 0 });
+    this.afterOneShot = () => {
+      this.yaw = CHAIR_YAW;
+      this.play?.(CLIP.sit, false, { ...HOLD_END, fade: 0 });
+    };
+  }
+
+  private nearStand(metrics: ShoeboxMetrics) {
+    const [sx, , sz] = chairStandPoint(metrics);
+    return Math.hypot(this.x - sx, this.z - sz) < 0.22;
+  }
+
+  private stand(onStood?: () => void) {
+    if (!this.seated) return;
+    const metrics = this.lastMetrics;
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.sitPlant = null;
+    this.play?.(CLIP.stand, false);
+    this.pose = "idle";
+    if (metrics) {
+      const [x, , z] = chairStandPoint(metrics);
+      this.startStep(x, z, 0.28, STAND_DURATION - 0.28);
+    }
+    this.afterOneShot = () => {
+      this.seated = false;
+      this.step = null;
+      this.yaw = CHAIR_YAW;
+      if (metrics) {
+        const [x, , z] = chairStandPoint(metrics);
+        this.x = x;
+        this.z = z;
+      }
+      if (onStood) onStood();
+      else this.stillStand();
+    };
   }
 
   private oneShot(clip: string, pose: ActorPose) {
@@ -295,8 +459,154 @@ export class Controller {
     this.walk = null;
     this.path = [];
     this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.sitPlant = null;
+    this.afterOneShot = null;
+    this.afterHold = null;
+    this.afterTurn = null;
+    this.hold = 0;
+    this.pendingSit = false;
     this.pose = pose;
     this.play?.(clip, false);
+  }
+
+  private stopWalk() {
+    if (this.pendingSit && this.lastMetrics && this.nearStand(this.lastMetrics)) {
+      this.prepareSit();
+      return;
+    }
+    this.stillStand();
+  }
+
+  private anchorToPlant(plant: FloorXZ, soles: FloorXZ) {
+    const root = offsetRoot(plant.x, plant.z, this.yaw, soles.x, soles.z);
+    this.x = root.x;
+    this.z = root.z;
+    this.y = 0;
+  }
+
+  private startStep(x1: number, z1: number, delay: number, duration: number) {
+    if (Math.hypot(x1 - this.x, z1 - this.z) < 0.01) {
+      this.step = null;
+      return;
+    }
+    this.step = {
+      x0: this.x,
+      z0: this.z,
+      x1,
+      z1,
+      delay,
+      duration: Math.max(0.05, duration),
+      t: 0,
+    };
+  }
+
+  private advanceStep(dt: number) {
+    const step = this.step;
+    if (!step) return;
+    step.t += dt;
+    if (step.t < step.delay) return;
+    const u = smoothstep(Math.min(1, (step.t - step.delay) / step.duration));
+    this.x = step.x0 + (step.x1 - step.x0) * u;
+    this.z = step.z0 + (step.z1 - step.z0) * u;
+    this.y = 0;
+    if (u >= 1) {
+      this.x = step.x1;
+      this.z = step.z1;
+      this.step = null;
+    }
+  }
+
+  private maybeTurn() {
+    if (!this.walk || this.turning) return false;
+    const dist = Math.hypot(this.walk.x - this.x, this.walk.z - this.z);
+    if (dist < 0.55) return false;
+    const heading = Math.atan2(this.walk.x - this.x, this.walk.z - this.z);
+    const from = wrapPi(this.yaw);
+    const delta = wrapPi(heading - from);
+    if (Math.abs(delta) < TURN_THRESH) return false;
+    const localX = delta > 0 ? -PIVOT_X : PIVOT_X;
+    const localZ = BODY.foot.d * 0.05;
+    const plant = offsetWorld(this.x, this.z, from, localX, localZ);
+    this.yaw = from;
+    this.turning = {
+      from,
+      to: from + delta,
+      duration: TURN_DURATION,
+      t: 0,
+      plantX: plant.x,
+      plantZ: plant.z,
+      localX,
+      localZ,
+    };
+    this.footLock = null;
+    this.pose = "turn";
+    this.play?.(delta > 0 ? CLIP.turnLeft : CLIP.turnRight, false, { fade: 0.1 });
+    this.afterOneShot = () => this.finishTurn();
+    return true;
+  }
+
+  private advanceTurn(dt: number) {
+    const turn = this.turning;
+    if (!turn) return;
+    turn.t += dt;
+    const u = smoothstep(Math.min(1, turn.t / turn.duration));
+    this.yaw = turn.from + (turn.to - turn.from) * u;
+    const root = offsetRoot(turn.plantX, turn.plantZ, this.yaw, turn.localX, turn.localZ);
+    this.x = root.x;
+    this.z = root.z;
+    this.y = 0;
+  }
+
+  private finishTurn() {
+    const turn = this.turning;
+    this.turning = null;
+    if (turn) {
+      this.yaw = wrapPi(turn.to);
+      const root = offsetRoot(turn.plantX, turn.plantZ, this.yaw, turn.localX, turn.localZ);
+      this.x = root.x;
+      this.z = root.z;
+    }
+    const next = this.afterTurn;
+    this.afterTurn = null;
+    if (next) {
+      next();
+      return;
+    }
+    if (!this.walk) {
+      this.stillStand();
+      return;
+    }
+    this.pose = "walk";
+    this.footLock = null;
+    this.play?.(CLIP.walk, true, { fade: 0.08 });
+  }
+
+  private faceThen(yaw: number, then: () => void) {
+    const from = wrapPi(this.yaw);
+    const delta = wrapPi(yaw - from);
+    if (Math.abs(delta) < 0.12) {
+      this.yaw = wrapPi(yaw);
+      then();
+      return;
+    }
+    this.yaw = from;
+    this.turning = {
+      from,
+      to: from + delta,
+      duration: TURN_DURATION,
+      t: 0,
+      plantX: this.x,
+      plantZ: this.z,
+      localX: 0,
+      localZ: 0,
+    };
+    this.footLock = null;
+    this.pose = "turn";
+    this.afterTurn = then;
+    this.play?.(delta > 0 ? CLIP.turnLeft : CLIP.turnRight, false, { fade: 0.1 });
+    this.afterOneShot = () => this.finishTurn();
   }
 
   private walkTarget(plan: Plan, metrics: ShoeboxMetrics): [number, number, number] {
@@ -305,7 +615,7 @@ export class Controller {
   }
 
   private keepInRoom(metrics: ShoeboxMetrics) {
-    if (this.seated) return;
+    if (this.seated || this.pendingSit) return;
     const [x, , z] = resolveFloor(this.x, this.z, metrics);
     this.x = x;
     this.z = z;
@@ -318,15 +628,54 @@ export class Controller {
   }
 }
 
+function wallOnly(
+  x: number,
+  z: number,
+  metrics: ShoeboxMetrics,
+): [number, number, number] {
+  const walls = clampWalls(x, z, metrics);
+  return [walls.x, 0, walls.z];
+}
+
+function wrapPi(angle: number) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function lerpAngle(from: number, to: number, t: number) {
+  return from + wrapPi(to - from) * Math.min(1, Math.max(0, t));
+}
+
+function smoothstep(t: number) {
+  return t * t * (3 - 2 * t);
+}
+
+function offsetWorld(x: number, z: number, yaw: number, localX: number, localZ: number) {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  return {
+    x: x + localX * c + localZ * s,
+    z: z - localX * s + localZ * c,
+  };
+}
+
+function offsetRoot(plantX: number, plantZ: number, yaw: number, localX: number, localZ: number) {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  return {
+    x: plantX - (localX * c + localZ * s),
+    z: plantZ - (-localX * s + localZ * c),
+  };
+}
+
 export function catalogObjects(metrics: ShoeboxMetrics): CatalogObject[] {
-  const chair = floorPoint(metrics, CHAIR_U, CHAIR_V);
+  const chair = chairPos(metrics);
   return [
     {
       id: CHAIR_ID,
       kind: "chair",
       affordances: ["sit"],
       pos: chair,
-      yaw: 0,
+      yaw: CHAIR_YAW,
       seatHeight: CHAIR_SEAT_HEIGHT,
     },
   ];

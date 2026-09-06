@@ -9,6 +9,8 @@ export const CLIP = {
   stand: "Sitting_Exit",
   wave: "Waving",
   glare: "Glaring",
+  turnLeft: "Turn_Left",
+  turnRight: "Turn_Right",
 } as const;
 
 export const HOLD_START = { hold: "start" as const };

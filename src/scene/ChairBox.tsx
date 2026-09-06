@@ -1,10 +1,100 @@
-import { floorPoint, type ShoeboxMetrics } from "./shoebox";
+import { useEffect, useMemo } from "react";
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from "three";
+import { type ShoeboxMetrics } from "./shoebox";
 
 export const CHAIR_ID = "chair-1";
-export const CHAIR_U = 0.72;
-export const CHAIR_V = 0.38;
-export const CHAIR_SEAT_HEIGHT = 0.42;
-export const CHAIR_SIZE: [number, number, number] = [0.45, CHAIR_SEAT_HEIGHT, 0.45];
+/** Seat top. Matches a sitting adult’s shin + foot. */
+export const CHAIR_SEAT_HEIGHT = 0.47;
+/** Square seat: width and depth equal the seat height. */
+export const CHAIR_SEAT = CHAIR_SEAT_HEIGHT;
+/** Uniform stock for legs, rails, and seat frame. */
+export const CHAIR_STOCK = 0.044;
+/** Total height is twice the seat, as in the oak original. */
+export const CHAIR_TOTAL_H = CHAIR_SEAT_HEIGHT * 2;
+const RAIL_H = CHAIR_STOCK * 1.75;
+export const CHAIR_SIZE: [number, number, number] = [
+  CHAIR_SEAT,
+  CHAIR_SEAT_HEIGHT,
+  CHAIR_SEAT,
+];
+/** Faces into the room from the right-back corner. */
+export const CHAIR_YAW = (-60 * Math.PI) / 180;
+const CORNER_INSET = 0.54;
+
+export function chairPos(metrics: ShoeboxMetrics): [number, number, number] {
+  return [metrics.width - CORNER_INSET, 0, -metrics.depth + CORNER_INSET];
+}
+
+export function chairForward() {
+  return { x: Math.sin(CHAIR_YAW), z: Math.cos(CHAIR_YAW) };
+}
+
+export function chairSitPoint(metrics: ShoeboxMetrics): [number, number, number] {
+  const [x, , z] = chairPos(metrics);
+  const f = chairForward();
+  const d = CHAIR_SEAT / 2 - 0.01;
+  return [x + f.x * d, 0, z + f.z * d];
+}
+
+function useOakMap() {
+  const map = useMemo(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#d9b88a";
+    ctx.fillRect(0, 0, 128, 256);
+    for (let i = 0; i < 32; i += 1) {
+      const x = (i / 32) * 128 + Math.sin(i * 1.7) * 4;
+      ctx.strokeStyle = `rgba(98, 62, 28, ${0.04 + (i % 6) * 0.018})`;
+      ctx.lineWidth = 0.7 + (i % 4) * 0.35;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.quadraticCurveTo(x + 7, 128, x - 3, 256);
+      ctx.stroke();
+    }
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.wrapS = RepeatWrapping;
+    tex.wrapT = RepeatWrapping;
+    tex.anisotropy = 8;
+    return tex;
+  }, []);
+
+  useEffect(() => () => map?.dispose(), [map]);
+  return map;
+}
+
+function Oak({ map, tone = "#f3e2c4" }: { map: CanvasTexture | null; tone?: string }) {
+  return (
+    <meshStandardMaterial
+      map={map ?? undefined}
+      color={map ? tone : "#d2b17c"}
+      roughness={0.62}
+      metalness={0.02}
+    />
+  );
+}
+
+function Beam({
+  position,
+  size,
+  map,
+  tone,
+}: {
+  position: [number, number, number];
+  size: [number, number, number];
+  map: CanvasTexture | null;
+  tone?: string;
+}) {
+  return (
+    <mesh position={position} castShadow receiveShadow>
+      <boxGeometry args={size} />
+      <Oak map={map} tone={tone} />
+    </mesh>
+  );
+}
 
 export function ChairBox({
   metrics,
@@ -13,42 +103,50 @@ export function ChairBox({
   metrics: ShoeboxMetrics;
   onSit?: () => void;
 }) {
-  const [x, , z] = floorPoint(metrics, CHAIR_U, CHAIR_V);
-  const [sx, sy, sz] = CHAIR_SIZE;
+  const [x, , z] = chairPos(metrics);
+  const oak = useOakMap();
+  const t = CHAIR_STOCK;
+  const w = CHAIR_SEAT;
+  const inner = w - 2 * t;
+  const half = w / 2;
+  const edge = half - t / 2;
+  const seatY = CHAIR_SEAT_HEIGHT - t / 2;
 
   return (
     <group
       position={[x, 0, z]}
+      rotation={[0, CHAIR_YAW, 0]}
       onClick={(event) => {
         event.stopPropagation();
         onSit?.();
       }}
     >
-      <mesh position={[0, sy - 0.03, 0]} castShadow receiveShadow>
-        <boxGeometry args={[sx, 0.06, sz]} />
-        <meshStandardMaterial color="#6e6e6e" />
-      </mesh>
-      {(
-        [
-          [-1, -1],
-          [1, -1],
-          [-1, 1],
-          [1, 1],
-        ] as const
-      ).map(([lx, lz]) => (
-        <mesh
-          key={`${lx}${lz}`}
-          position={[(sx / 2 - 0.05) * lx, (sy - 0.06) / 2, (sz / 2 - 0.05) * lz]}
-          castShadow
-        >
-          <boxGeometry args={[0.045, sy - 0.06, 0.045]} />
-          <meshStandardMaterial color="#5a5a5a" />
-        </mesh>
+      {([-1, 1] as const).map((side) => (
+        <Beam
+          key={`f${side}`}
+          position={[side * edge, CHAIR_SEAT_HEIGHT / 2, edge]}
+          size={[t, CHAIR_SEAT_HEIGHT, t]}
+          map={oak}
+        />
       ))}
-      <mesh position={[0, sy + 0.2, -sz / 2 + 0.04]} castShadow>
-        <boxGeometry args={[sx, 0.4, 0.08]} />
-        <meshStandardMaterial color="#5c5c5c" />
-      </mesh>
+      {([-1, 1] as const).map((side) => (
+        <Beam
+          key={`r${side}`}
+          position={[side * edge, CHAIR_TOTAL_H / 2, -edge]}
+          size={[t, CHAIR_TOTAL_H, t]}
+          map={oak}
+        />
+      ))}
+      <Beam position={[0, seatY, 0]} size={[inner, t, inner]} map={oak} tone="#f7ead3" />
+      <Beam position={[0, seatY, edge]} size={[inner, t, t]} map={oak} />
+      <Beam position={[0, seatY, -edge]} size={[inner, t, t]} map={oak} />
+      <Beam position={[edge, seatY, 0]} size={[t, t, inner]} map={oak} />
+      <Beam position={[-edge, seatY, 0]} size={[t, t, inner]} map={oak} />
+      <Beam
+        position={[0, CHAIR_TOTAL_H - RAIL_H / 2, -edge]}
+        size={[inner, RAIL_H, t]}
+        map={oak}
+      />
     </group>
   );
 }

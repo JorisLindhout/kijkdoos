@@ -37,7 +37,7 @@ export function Resident({
   useFrame((_state, dt) => {
     const step = Math.min(dt, 0.05);
     player.update(step);
-    controller.tick(step, metrics, player.walkContact());
+    controller.tick(step, metrics, player.walkContact(), player.solesLocal());
     const g = group.current;
     if (g) {
       g.position.set(controller.x, controller.y, controller.z);

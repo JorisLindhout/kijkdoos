@@ -1,4 +1,3 @@
-import { CHAIR_SEAT_HEIGHT } from "../scene/ChairBox";
 import { BODY, HIP_HEIGHT, type JointId } from "./blockBody";
 
 export type EulerXYZ = [number, number, number];
@@ -37,8 +36,12 @@ export const STAND: Pose = {
   },
 };
 
+const SIT_THIGH = -86 * D;
+const SIT_SHIN = 86 * D;
+const SIT_FOOT = -(SIT_THIGH + SIT_SHIN);
+
 const SIT: Pose = {
-  hipsY: CHAIR_SEAT_HEIGHT,
+  hipsY: stanceReach(SIT_THIGH, SIT_SHIN, SIT_FOOT) - PLANT,
   hipsX: 0,
   rot: {
     torso: [6 * D, 0, 0],
@@ -46,17 +49,21 @@ const SIT: Pose = {
     lowerarm_l: [-40 * D, 0, 0],
     upperarm_r: [-12 * D, 0, -10 * D],
     lowerarm_r: [-40 * D, 0, 0],
-    thigh_l: [-88 * D, 0, -4 * D],
-    shin_l: [86 * D, 0, 0],
-    foot_l: [4 * D, 0, 0],
-    thigh_r: [-88 * D, 0, 4 * D],
-    shin_r: [86 * D, 0, 0],
-    foot_r: [4 * D, 0, 0],
+    thigh_l: [SIT_THIGH, 0, -4 * D],
+    shin_l: [SIT_SHIN, 0, 0],
+    foot_l: [SIT_FOOT, 0, 0],
+    thigh_r: [SIT_THIGH, 0, 4 * D],
+    shin_r: [SIT_SHIN, 0, 0],
+    foot_r: [SIT_FOOT, 0, 0],
   },
 };
 
+const SQUAT_THIGH = -52 * D;
+const SQUAT_SHIN = 58 * D;
+const SQUAT_FOOT = -(SQUAT_THIGH + SQUAT_SHIN);
+
 const SQUAT: Pose = {
-  hipsY: HIP_HEIGHT * 0.62,
+  hipsY: stanceReach(SQUAT_THIGH, SQUAT_SHIN, SQUAT_FOOT) - PLANT,
   hipsX: 0,
   rot: {
     torso: [12 * D, 0, 0],
@@ -64,10 +71,12 @@ const SQUAT: Pose = {
     lowerarm_l: [-16 * D, 0, 0],
     upperarm_r: [8 * D, 0, -10 * D],
     lowerarm_r: [-16 * D, 0, 0],
-    thigh_l: [-55 * D, 0, -4 * D],
-    shin_l: [70 * D, 0, 0],
-    thigh_r: [-55 * D, 0, 4 * D],
-    shin_r: [70 * D, 0, 0],
+    thigh_l: [SQUAT_THIGH, 0, -4 * D],
+    shin_l: [SQUAT_SHIN, 0, 0],
+    foot_l: [SQUAT_FOOT, 0, 0],
+    thigh_r: [SQUAT_THIGH, 0, 4 * D],
+    shin_r: [SQUAT_SHIN, 0, 0],
+    foot_r: [SQUAT_FOOT, 0, 0],
   },
 };
 
@@ -104,32 +113,131 @@ const GLARE: Pose = {
   },
 };
 
+const TURN_WINDUP: Pose = {
+  hipsY: HIP_HEIGHT - 0.03,
+  hipsX: 3 * D,
+  rot: {
+    ...STAND.rot,
+    torso: [4 * D, 10 * D, -3 * D],
+    head: [0, 18 * D, 0],
+    thigh_l: [-12 * D, 8 * D, -4 * D],
+    shin_l: [18 * D, 0, 0],
+    foot_l: [-4 * D, 0, 0],
+    thigh_r: [6 * D, -6 * D, 4 * D],
+    shin_r: [8 * D, 0, 0],
+    upperarm_l: [8 * D, 0, 14 * D],
+    upperarm_r: [-10 * D, 0, -14 * D],
+  },
+};
+
+const TURN_STEP: Pose = {
+  hipsY: HIP_HEIGHT - 0.045,
+  hipsX: 6 * D,
+  rot: {
+    torso: [6 * D, 22 * D, -4 * D],
+    head: [4 * D, 28 * D, -2 * D],
+    thigh_l: [-42 * D, 18 * D, -6 * D],
+    shin_l: [50 * D, 0, 0],
+    foot_l: [8 * D, 0, 0],
+    thigh_r: [8 * D, -10 * D, 5 * D],
+    shin_r: [10 * D, 0, 0],
+    foot_r: [-6 * D, 0, 0],
+    upperarm_l: [18 * D, 0, 16 * D],
+    lowerarm_l: [-12 * D, 0, 0],
+    upperarm_r: [-18 * D, 0, -16 * D],
+    lowerarm_r: [-8 * D, 0, 0],
+  },
+};
+
+const TURN_SETTLE: Pose = {
+  hipsY: HIP_HEIGHT - 0.02,
+  hipsX: 2 * D,
+  rot: {
+    ...STAND.rot,
+    torso: [2 * D, 8 * D, 0],
+    head: [0, 6 * D, 0],
+    thigh_l: [4 * D, 4 * D, -3 * D],
+    thigh_r: [-8 * D, -8 * D, 3 * D],
+    shin_r: [16 * D, 0, 0],
+    upperarm_l: [4 * D, 0, 12 * D],
+    upperarm_r: [-4 * D, 0, -12 * D],
+  },
+};
+
+const TURN_SWAP: Partial<Record<JointId, JointId>> = {
+  upperarm_l: "upperarm_r",
+  upperarm_r: "upperarm_l",
+  lowerarm_l: "lowerarm_r",
+  lowerarm_r: "lowerarm_l",
+  hand_l: "hand_r",
+  hand_r: "hand_l",
+  thigh_l: "thigh_r",
+  thigh_r: "thigh_l",
+  shin_l: "shin_r",
+  shin_r: "shin_l",
+  foot_l: "foot_r",
+  foot_r: "foot_l",
+};
+
+function mirrorPose(pose: Pose): Pose {
+  const rot: JointMap = {};
+  for (const id of Object.keys(pose.rot) as JointId[]) {
+    const e = pose.rot[id];
+    if (!e) continue;
+    const dest = TURN_SWAP[id] ?? id;
+    rot[dest] = [e[0], -e[1], -e[2]];
+  }
+  return {
+    hipsY: pose.hipsY,
+    hipsX: pose.hipsX != null ? -pose.hipsX : undefined,
+    rot,
+    stance: pose.stance === "l" ? "r" : pose.stance === "r" ? "l" : pose.stance,
+  };
+}
+
 function keys(pairs: [number, Pose][]): PoseKey[] {
   return pairs.map(([t, pose]) => ({ t, pose }));
 }
 
+const TURN_LEFT_KEYS = keys([
+  [0, STAND],
+  [0.14, TURN_WINDUP],
+  [0.4, TURN_STEP],
+  [0.62, TURN_SETTLE],
+  [0.9, STAND],
+]);
+
+const TURN_RIGHT_KEYS = TURN_LEFT_KEYS.map((key) => ({
+  t: key.t,
+  pose: mirrorPose(key.pose),
+}));
+
 export const WALK_DURATION = 1.2;
 export const WALK_HALF_STRIDE = 0.18;
+export const TURN_DURATION = 0.9;
+export const SIT_DURATION = 0.85;
+export const STAND_DURATION = 0.75;
 
 export const CLIPS: Record<string, ClipDef> = {
   Stand_Still: { kind: "keys", duration: 0.05, keys: keys([[0, STAND]]) },
   Walk_Loop: { kind: "walk", duration: WALK_DURATION },
   Sitting_Enter: {
     kind: "keys",
-    duration: 0.85,
+    duration: SIT_DURATION,
     keys: keys([
       [0, STAND],
-      [0.4, SQUAT],
-      [0.85, SIT],
+      [0.28, SQUAT],
+      [SIT_DURATION, SIT],
     ]),
   },
   Sitting_Exit: {
     kind: "keys",
-    duration: 0.75,
+    duration: STAND_DURATION,
     keys: keys([
       [0, SIT],
-      [0.35, SQUAT],
-      [0.75, STAND],
+      [0.18, SIT],
+      [0.48, SQUAT],
+      [STAND_DURATION, STAND],
     ]),
   },
   Waving: {
@@ -155,6 +263,8 @@ export const CLIPS: Record<string, ClipDef> = {
       [1.15, STAND],
     ]),
   },
+  Turn_Left: { kind: "keys", duration: TURN_DURATION, keys: TURN_LEFT_KEYS },
+  Turn_Right: { kind: "keys", duration: TURN_DURATION, keys: TURN_RIGHT_KEYS },
 };
 
 /** Vertical reach of a hanging leg, measured under the ankle. */

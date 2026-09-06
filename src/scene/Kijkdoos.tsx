@@ -1,6 +1,6 @@
 import { Canvas, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { DirectionalLight } from "three";
+import { SpotLight } from "three";
 import { ACTOR_LOGIC, Controller, THOUGHT_CAP } from "../actor/Controller";
 import { requestPlan } from "../brain/client";
 import { ChairBox } from "./ChairBox";
@@ -10,40 +10,59 @@ import { ShoeboxCamera } from "./ShoeboxCamera";
 import { computeShoebox, type ShoeboxMetrics } from "./shoebox";
 import { useVisualViewportFill } from "./useVisualViewportFill";
 
-function KeyLight({ metrics }: { metrics: ShoeboxMetrics }) {
-  const light = useRef<DirectionalLight>(null);
+function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
+  const light = useRef<SpotLight>(null);
   const { scene } = useThree();
-  const reach = metrics.camDist + metrics.depth + 2;
+  const x = metrics.width / 2;
+  const z = -metrics.depth / 2;
+  const y = metrics.height - 0.05;
 
   useLayoutEffect(() => {
-    const sun = light.current;
-    if (!sun) return;
-    sun.target.position.set(metrics.width / 2, 0.04, -metrics.depth);
-    scene.add(sun.target);
-    sun.target.updateMatrixWorld();
+    const spot = light.current;
+    if (!spot) return;
+    spot.target.position.set(x, 0, z);
+    scene.add(spot.target);
+    spot.target.updateMatrixWorld();
     return () => {
-      scene.remove(sun.target);
+      scene.remove(spot.target);
     };
-  }, [metrics, scene]);
-
-  const span = Math.max(metrics.width, metrics.depth) * 1.15;
+  }, [scene, x, z]);
 
   return (
-    <directionalLight
-      ref={light}
-      position={[metrics.width * 0.34, metrics.height * 1.15, metrics.camDist * 0.55]}
-      intensity={0.95}
-      castShadow
-      shadow-mapSize={[2048, 2048]}
-      shadow-bias={-0.00015}
-      shadow-normalBias={0.012}
-      shadow-camera-near={0.2}
-      shadow-camera-far={reach}
-      shadow-camera-left={-span}
-      shadow-camera-right={span}
-      shadow-camera-top={span}
-      shadow-camera-bottom={-span * 0.45}
-    />
+    <group>
+      <spotLight
+        ref={light}
+        position={[x, y, z]}
+        color="#efd4a0"
+        intensity={70}
+        distance={metrics.height * 3.2}
+        decay={2}
+        angle={0.92}
+        penumbra={0.82}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.00022}
+        shadow-normalBias={0.018}
+        shadow-camera-near={0.06}
+        shadow-camera-far={metrics.height * 2.2}
+      />
+      <pointLight
+        position={[x, y, z]}
+        color="#f2d9a8"
+        intensity={6}
+        distance={0.55}
+        decay={2}
+      />
+      <mesh position={[x, y + 0.015, z]}>
+        <sphereGeometry         args={[0.022, 16, 12]} />
+        <meshStandardMaterial
+          color="#e8c980"
+          emissive="#e0b45a"
+          emissiveIntensity={1.6}
+          roughness={0.4}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -110,10 +129,10 @@ function Scene() {
 
   return (
     <>
+      <color attach="background" args={["#050403"]} />
       <ShoeboxCamera metrics={metrics} />
-      <hemisphereLight args={["#fff6ea", "#9c8b73", 0.7]} />
-      <ambientLight intensity={0.25} />
-      <KeyLight metrics={metrics} />
+      <ambientLight color="#1c140e" intensity={0.045} />
+      <CeilingLamp metrics={metrics} />
       <Room
         metrics={metrics}
         onFloorClick={(point) => c.clickFloor(point, metrics)}

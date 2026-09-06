@@ -1,5 +1,5 @@
 import { Vector3, type Group } from "three";
-import { BODY, HIP_HEIGHT, JOINT_IDS, type BlockPerson } from "./blockBody";
+import { BODY, JOINT_IDS, type BlockPerson } from "./blockBody";
 import type { PlayOpts, WalkContact } from "./Controller";
 import {
   CLIPS,
@@ -10,14 +10,23 @@ import {
   type Pose,
 } from "./poses";
 
-const PLANT = 0.02;
 const _sole = new Vector3();
 const _local = new Vector3();
+const FOOT_CORNERS: [number, number, number][] = [
+  [-BODY.foot.w * 0.45, -BODY.foot.h, BODY.foot.d * 0.22 - BODY.foot.d * 0.5],
+  [BODY.foot.w * 0.45, -BODY.foot.h, BODY.foot.d * 0.22 - BODY.foot.d * 0.5],
+  [-BODY.foot.w * 0.45, -BODY.foot.h, BODY.foot.d * 0.22 + BODY.foot.d * 0.5],
+  [BODY.foot.w * 0.45, -BODY.foot.h, BODY.foot.d * 0.22 + BODY.foot.d * 0.5],
+];
 
-function soleY(joint: Group) {
+function lowestFootY(joint: Group) {
   joint.updateWorldMatrix(true, false);
-  _sole.set(0, -BODY.foot.h, BODY.foot.d * 0.22).applyMatrix4(joint.matrixWorld);
-  return _sole.y;
+  let min = Infinity;
+  for (const [x, y, z] of FOOT_CORNERS) {
+    _sole.set(x, y, z).applyMatrix4(joint.matrixWorld);
+    min = Math.min(min, _sole.y);
+  }
+  return min;
 }
 
 export class PosePlayer {
@@ -101,6 +110,22 @@ export class PosePlayer {
     return { side, x: _local.x, z: _local.z };
   }
 
+  /** Midpoint of both soles in root space, so a sit can pivot around planted feet. */
+  solesLocal(): { x: number; z: number } {
+    const { root, joints } = this.person;
+    root.updateWorldMatrix(true, true);
+    let x = 0;
+    let z = 0;
+    for (const foot of [joints.foot_l, joints.foot_r]) {
+      _sole.set(0, -BODY.foot.h, BODY.foot.d * 0.22).applyMatrix4(foot.matrixWorld);
+      _local.copy(_sole);
+      root.worldToLocal(_local);
+      x += _local.x * 0.5;
+      z += _local.z * 0.5;
+    }
+    return { x, z };
+  }
+
   private poseAt(time: number): Pose {
     const def = CLIPS[this.clip];
     if (!def) return STAND;
@@ -122,8 +147,7 @@ export class PosePlayer {
       const e = pose.rot[id] ?? [0, 0, 0];
       joints[id].rotation.set(e[0], e[1], e[2]);
     }
-    if ((pose.hipsY ?? HIP_HEIGHT) < HIP_HEIGHT * 0.75) return;
-    const lowest = Math.min(soleY(joints.foot_l), soleY(joints.foot_r));
-    hips.position.y += -PLANT - lowest;
+    const lowest = Math.min(lowestFootY(joints.foot_l), lowestFootY(joints.foot_r));
+    if (lowest < 0) hips.position.y -= lowest;
   }
 }

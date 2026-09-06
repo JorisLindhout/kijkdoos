@@ -1,10 +1,10 @@
 import { type ThreeEvent } from "@react-three/fiber";
 import { type ShoeboxMetrics } from "./shoebox";
 
-const FLOOR = "#c4a574";
-const WALL = "#d9c4a0";
-const CEILING = "#e8dcc8";
-const BACK = "#c9b48a";
+const FLOOR = "#4e3c2c";
+const WALL = "#2c241c";
+const CEILING = "#1a1511";
+const BACK = "#261e18";
 
 export function Room({
   metrics,
@@ -32,23 +32,23 @@ export function Room({
         onClick={handleFloor}
       >
         <planeGeometry args={[w, d]} />
-        <meshStandardMaterial color={FLOOR} />
+        <meshStandardMaterial color={FLOOR} roughness={0.92} />
       </mesh>
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[cx, h, zMid]}>
         <planeGeometry args={[w, d]} />
-        <meshStandardMaterial color={CEILING} />
+        <meshStandardMaterial color={CEILING} roughness={0.95} />
       </mesh>
       <mesh rotation={[0, Math.PI / 2, 0]} position={[0, cy, zMid]} receiveShadow>
         <planeGeometry args={[d, h]} />
-        <meshStandardMaterial color={WALL} />
+        <meshStandardMaterial color={WALL} roughness={0.94} />
       </mesh>
       <mesh rotation={[0, -Math.PI / 2, 0]} position={[w, cy, zMid]} receiveShadow>
         <planeGeometry args={[d, h]} />
-        <meshStandardMaterial color={WALL} />
+        <meshStandardMaterial color={WALL} roughness={0.94} />
       </mesh>
       <mesh position={[cx, cy - 0.03, -d - 0.02]} receiveShadow>
         <boxGeometry args={[w + 0.04, h + 0.06, 0.04]} />
-        <meshStandardMaterial color={BACK} />
+        <meshStandardMaterial color={BACK} roughness={0.94} />
       </mesh>
     </group>
   );
