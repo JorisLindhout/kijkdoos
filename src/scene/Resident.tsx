@@ -1,10 +1,10 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { type Group } from "three";
-import { RIG, createBlockPerson } from "../actor/blockBody";
-import { CLIP } from "../actor/clips";
+import { RIG, createBlockPerson, tintPerson } from "../actor/blockBody";
 import { type Controller, type PlayOpts } from "../actor/Controller";
 import { PosePlayer } from "../actor/posePlayer";
+import { usePalette } from "../useTheme";
 import { type ShoeboxMetrics } from "./shoebox";
 
 export function Resident({
@@ -17,6 +17,11 @@ export function Resident({
   const group = useRef<Group>(null);
   const person = useMemo(() => createBlockPerson(), [RIG]);
   const player = useMemo(() => new PosePlayer(person), [person]);
+  const palette = usePalette();
+
+  useEffect(() => {
+    tintPerson(person.root, palette);
+  }, [person, palette]);
 
   useEffect(() => {
     const play = (name: string, loop: boolean, opts?: PlayOpts) => {
@@ -25,7 +30,6 @@ export function Resident({
     player.onFinished = () => controller.onClipFinished();
     controller.play = play;
     controller.start(metrics);
-    play(CLIP.idle, false, { hold: "start" });
     return () => {
       player.onFinished = null;
       if (controller.play === play) controller.play = null;

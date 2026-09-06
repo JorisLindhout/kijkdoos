@@ -11,22 +11,32 @@ export function dummyThink(snapshot: Snapshot): Plan {
     return { action: "glare" };
   }
 
-  if (stare >= 8 && !recent("wave") && !recent("glare")) {
-    return Math.random() < 0.55 ? { action: "wave" } : { action: "glare" };
+  if (pose === "sit") {
+    if (!recent("stand") && Math.random() < 0.08) return { action: "stand" };
+    const pick = Math.random();
+    if (pick < 0.65) return { action: "still" };
+    if (pick < 0.8) return { action: "fidget" };
+    if (pick < 0.9) return { action: "look_at_user" };
+    return { action: "idle" };
   }
 
-  if (pose === "sit" && recent("sit")) {
-    return { action: "stand" };
-  }
-
-  if (chair && pose !== "sit" && !recent("sit") && Math.random() < 0.35) {
+  if (chair && pose !== "sit" && !recent("sit") && Math.random() < 0.1) {
     return { action: "sit", target: chair.id };
   }
 
-  if (pose === "idle") {
-    if (Math.random() < 0.45) return { action: "idle" };
+  if (stare >= 10 && !recent("look_at_user") && Math.random() < 0.2) {
+    return { action: "look_at_user" };
+  }
+
+  if (pose === "idle" || pose === "still" || pose === "look") {
+    const pick = Math.random();
+    if (pick < 0.65) return { action: "still" };
+    if (pick < 0.78) return { action: "fidget" };
+    if (pick < 0.86) return { action: "look_at_user" };
+    if (pick < 0.91) return { action: "emote" };
+    if (pick < 0.96) return { action: "idle" };
     return { action: "walk_to" };
   }
 
-  return { action: "idle" };
+  return { action: "still" };
 }

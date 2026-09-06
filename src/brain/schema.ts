@@ -1,5 +1,6 @@
 export const ACTIONS = [
   "idle",
+  "still",
   "fidget",
   "walk_to",
   "sit",

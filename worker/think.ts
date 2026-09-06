@@ -8,7 +8,7 @@ type Env = {
 
 const SYSTEM = `You are the director of a silent shoebox resident. Reply with JSON only:
 {"action":"...","target":"...","mood":"...","say":"..."}
-action must be one of: idle, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote.
+action must be one of: idle, still, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote.
 target must be an id from the snapshot objects list, or omitted.
 Never invent objects. Prefer one action. Do not narrate.`;
 

@@ -1,70 +1,15 @@
 import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { SpotLight } from "three";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { ACTOR_LOGIC, Controller, THOUGHT_CAP } from "../actor/Controller";
 import { requestPlan } from "../brain/client";
+import { CeilingLamp } from "./CeilingLamp";
 import { ChairBox } from "./ChairBox";
 import { Resident } from "./Resident";
 import { Room } from "./Room";
 import { ShoeboxCamera } from "./ShoeboxCamera";
 import { computeShoebox, type ShoeboxMetrics } from "./shoebox";
 import { useVisualViewportFill } from "./useVisualViewportFill";
-
-function CeilingLamp({ metrics }: { metrics: ShoeboxMetrics }) {
-  const light = useRef<SpotLight>(null);
-  const { scene } = useThree();
-  const x = metrics.width / 2;
-  const z = -metrics.depth / 2;
-  const y = metrics.height - 0.05;
-
-  useLayoutEffect(() => {
-    const spot = light.current;
-    if (!spot) return;
-    spot.target.position.set(x, 0, z);
-    scene.add(spot.target);
-    spot.target.updateMatrixWorld();
-    return () => {
-      scene.remove(spot.target);
-    };
-  }, [scene, x, z]);
-
-  return (
-    <group>
-      <spotLight
-        ref={light}
-        position={[x, y, z]}
-        color="#efd4a0"
-        intensity={70}
-        distance={metrics.height * 3.2}
-        decay={2}
-        angle={0.92}
-        penumbra={0.82}
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-        shadow-bias={-0.00022}
-        shadow-normalBias={0.018}
-        shadow-camera-near={0.06}
-        shadow-camera-far={metrics.height * 2.2}
-      />
-      <pointLight
-        position={[x, y, z]}
-        color="#f2d9a8"
-        intensity={6}
-        distance={0.55}
-        decay={2}
-      />
-      <mesh position={[x, y + 0.015, z]}>
-        <sphereGeometry         args={[0.022, 16, 12]} />
-        <meshStandardMaterial
-          color="#e8c980"
-          emissive="#e0b45a"
-          emissiveIntensity={1.6}
-          roughness={0.4}
-        />
-      </mesh>
-    </group>
-  );
-}
+import { PaletteBridge, usePalette } from "../useTheme";
 
 function Scene() {
   const { size, gl } = useThree();
@@ -81,12 +26,17 @@ function Scene() {
     controllerRef.current = new Controller();
   }
   const c = controllerRef.current;
+  const palette = usePalette();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (key === "w") c.request({ action: "wave" }, metrics);
       if (key === "g") c.request({ action: "glare" }, metrics);
+      if (key === "f") c.request({ action: "fidget" }, metrics);
+      if (key === "l") c.request({ action: "look_at_user" }, metrics);
+      if (key === "e") c.request({ action: "emote" }, metrics);
+      if (key === "i") c.request({ action: "still" }, metrics);
       if (key === "s") c.request({ action: "sit" }, metrics);
       if (key === "x" && c.seated) c.request({ action: "stand" }, metrics);
     };
@@ -129,9 +79,9 @@ function Scene() {
 
   return (
     <>
-      <color attach="background" args={["#050403"]} />
+      <color attach="background" args={[palette.void]} />
       <ShoeboxCamera metrics={metrics} />
-      <ambientLight color="#1c140e" intensity={0.045} />
+      <ambientLight color={palette.ambient} intensity={palette.ambientIntensity} />
       <CeilingLamp metrics={metrics} />
       <Room
         metrics={metrics}
@@ -160,6 +110,7 @@ async function think(
 
 export function Kijkdoos() {
   const stageRef = useRef<HTMLDivElement>(null);
+  const palette = usePalette();
   useVisualViewportFill(stageRef);
 
   return (
@@ -170,11 +121,13 @@ export function Kijkdoos() {
         shadows
         camera={{ fov: 55, near: 0.05, far: 40 }}
       >
-        <Scene />
+        <PaletteBridge palette={palette}>
+          <Scene />
+        </PaletteBridge>
       </Canvas>
       <p className="hint">
         Click floor to walk · click chair to sit · click character to glare · W
-        wave · G glare · S sit · X stand
+        wave · G glare · F fidget · L look · E emote · I still · S sit · X stand
       </p>
     </div>
   );

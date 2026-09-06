@@ -1,5 +1,10 @@
 import { Kijkdoos } from "./scene/Kijkdoos";
+import { ThemeProvider } from "./useTheme";
 
 export function App() {
-  return <Kijkdoos />;
+  return (
+    <ThemeProvider>
+      <Kijkdoos />
+    </ThemeProvider>
+  );
 }

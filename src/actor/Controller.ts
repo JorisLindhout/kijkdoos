@@ -1,5 +1,5 @@
 import type { ActionName, CatalogObject, Plan, Snapshot } from "../brain/schema";
-import { CLIP, HOLD_END, HOLD_START } from "./clips";
+import { CLIP, HOLD_START } from "./clips";
 import { BODY } from "./blockBody";
 import { STAND_DURATION, TURN_DURATION } from "./poses";
 import {
@@ -20,7 +20,9 @@ import {
 } from "../scene/ChairBox";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 50;
+export const ACTOR_LOGIC = 54;
+const STILL_MIN = 6;
+const STILL_MAX = 24;
 const TURN_THRESH = Math.PI * 0.55;
 const YAW_FOLLOW = 9;
 const PIVOT_X = BODY.torso.w / 2 - BODY.thigh.w / 2;
@@ -31,7 +33,17 @@ export type WalkContact = {
   z: number;
 };
 
-export type ActorPose = "idle" | "walk" | "sit" | "wave" | "glare" | "turn";
+export type ActorPose =
+  | "idle"
+  | "still"
+  | "walk"
+  | "sit"
+  | "wave"
+  | "glare"
+  | "fidget"
+  | "look"
+  | "emote"
+  | "turn";
 
 export type PlayOpts = {
   reverse?: boolean;
@@ -98,6 +110,7 @@ export class Controller {
   private hold = 0;
   private afterHold: (() => void) | null = null;
   private afterTurn: (() => void) | null = null;
+  private quiet = 0;
 
   start(metrics: ShoeboxMetrics) {
     if (this.started) {
@@ -111,7 +124,7 @@ export class Controller {
     this.z = z;
     this.yaw = 0;
     this.y = 0;
-    this.stillStand();
+    this.holdStill();
   }
 
   private stillStand() {
@@ -126,8 +139,10 @@ export class Controller {
     this.afterTurn = null;
     this.hold = 0;
     this.pendingSit = false;
+    this.lookingAtUser = false;
+    this.quiet = 0;
     this.pose = "idle";
-    this.play?.(CLIP.idle, false, HOLD_START);
+    this.play?.(CLIP.idle, true, { fade: 0.18 });
   }
 
   snapshot(metrics: ShoeboxMetrics): Snapshot {
@@ -152,7 +167,7 @@ export class Controller {
     if (plan.target && !ids.has(plan.target)) {
       return;
     }
-    this.lookingAtUser = false;
+    this.lookingAtUser = plan.action === "look_at_user";
     this.request(plan, metrics);
   }
 
@@ -173,15 +188,23 @@ export class Controller {
         this.oneShot(CLIP.wave, "wave");
         break;
       case "glare":
-      case "emote":
         this.oneShot(CLIP.glare, "glare");
         break;
+      case "emote":
+        this.emote();
+        break;
       case "fidget":
+        this.fidget();
+        break;
       case "look_at_user":
-        if (!this.seated && !this.walk) this.stillStand();
+        this.lookAtUser(metrics);
+        break;
+      case "still":
+        this.holdStill();
         break;
       default:
-        if (!this.walk && !this.seated) this.stillStand();
+        if (this.seated) this.playSitIdle();
+        else if (!this.walk) this.stillStand();
     }
   }
 
@@ -211,7 +234,7 @@ export class Controller {
       return;
     }
     if (this.seated) {
-      this.play?.(CLIP.sit, false, { ...HOLD_END, fade: 0 });
+      this.playSitIdle();
       return;
     }
     this.stillStand();
@@ -219,13 +242,17 @@ export class Controller {
 
   walkBusy() {
     return (
-      this.seated ||
+      this.quiet > 0 ||
       this.pendingSit ||
       this.walk !== null ||
       this.pose === "walk" ||
+      this.pose === "wave" ||
+      this.pose === "glare" ||
+      this.pose === "fidget" ||
+      this.pose === "look" ||
+      this.pose === "emote" ||
       this.turning !== null ||
       this.step !== null ||
-      this.sitPlant !== null ||
       this.hold > 0
     );
   }
@@ -234,6 +261,7 @@ export class Controller {
     this.lastMetrics = metrics;
     if (soles) this.lastSoles = soles;
     this.energy = Math.min(1, Math.max(0.05, this.energy - 0.008 * dt));
+    if (this.quiet > 0) this.quiet = Math.max(0, this.quiet - dt);
     if (this.step) {
       this.advanceStep(dt);
       return;
@@ -329,6 +357,7 @@ export class Controller {
     const beginWalk = () => {
       this.seated = false;
       this.y = 0;
+      this.quiet = 0;
       this.turning = null;
       this.step = null;
       this.sitPlant = null;
@@ -373,6 +402,7 @@ export class Controller {
     if (this.seated) return;
     this.lastMetrics = metrics;
     this.pendingSit = true;
+    this.quiet = 0;
     this.turning = null;
     this.footLock = null;
     if (this.nearStand(metrics)) {
@@ -388,7 +418,7 @@ export class Controller {
     this.footLock = null;
     this.pendingSit = true;
     this.pose = "idle";
-    this.play?.(CLIP.idle, false, HOLD_START);
+    this.play?.(CLIP.still, false, HOLD_START);
     this.faceThen(CHAIR_YAW, () => {
       this.hold = 0.18;
       this.afterHold = () => this.beginSitDown();
@@ -401,7 +431,6 @@ export class Controller {
     this.footLock = null;
     this.turning = null;
     this.step = null;
-    this.pendingSit = false;
     this.seated = true;
     this.yaw = CHAIR_YAW;
     this.pose = "sit";
@@ -417,7 +446,8 @@ export class Controller {
     this.play?.(CLIP.sit, false, { fade: 0 });
     this.afterOneShot = () => {
       this.yaw = CHAIR_YAW;
-      this.play?.(CLIP.sit, false, { ...HOLD_END, fade: 0 });
+      this.pendingSit = false;
+      this.playSitIdle();
     };
   }
 
@@ -434,6 +464,7 @@ export class Controller {
     this.footLock = null;
     this.turning = null;
     this.sitPlant = null;
+    this.quiet = 0;
     this.play?.(CLIP.stand, false);
     this.pose = "idle";
     if (metrics) {
@@ -467,8 +498,92 @@ export class Controller {
     this.afterTurn = null;
     this.hold = 0;
     this.pendingSit = false;
+    this.quiet = 0;
     this.pose = pose;
     this.play?.(clip, false);
+  }
+
+  private fidget() {
+    if (this.seated) {
+      this.seatedShot(CLIP.sitFidget, "fidget");
+      return;
+    }
+    this.oneShot(CLIP.fidget, "fidget");
+  }
+
+  private emote() {
+    if (this.seated) {
+      this.seatedShot(CLIP.sitFidget, "emote");
+      return;
+    }
+    this.oneShot(CLIP.emote, "emote");
+  }
+
+  private lookAtUser(metrics: ShoeboxMetrics) {
+    this.lookingAtUser = true;
+    if (this.seated) {
+      this.seatedShot(CLIP.sitLook, "look");
+      return;
+    }
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.sitPlant = null;
+    this.pendingSit = false;
+    this.afterOneShot = null;
+    this.afterHold = null;
+    this.afterTurn = null;
+    this.hold = 0;
+    this.quiet = 0;
+    const heading = Math.atan2(metrics.width / 2 - this.x, metrics.camDist - this.z);
+    this.faceThen(heading, () => {
+      this.pose = "look";
+      this.play?.(CLIP.look, false);
+    });
+  }
+
+  private seatedShot(clip: string, pose: ActorPose) {
+    this.afterOneShot = null;
+    this.afterHold = null;
+    this.afterTurn = null;
+    this.hold = 0;
+    this.quiet = 0;
+    this.pose = pose;
+    this.play?.(clip, false);
+    this.afterOneShot = () => this.playSitIdle();
+  }
+
+  private playSitIdle() {
+    this.pendingSit = false;
+    this.pose = "sit";
+    this.yaw = CHAIR_YAW;
+    this.play?.(CLIP.sitIdle, true, { fade: 0.18 });
+  }
+
+  private holdStill() {
+    this.walk = null;
+    this.path = [];
+    this.footLock = null;
+    this.turning = null;
+    this.step = null;
+    this.afterOneShot = null;
+    this.afterHold = null;
+    this.afterTurn = null;
+    this.hold = 0;
+    this.pendingSit = false;
+    this.lookingAtUser = false;
+    this.quiet = STILL_MIN + Math.random() * (STILL_MAX - STILL_MIN);
+    if (this.seated) {
+      this.pose = "sit";
+      this.yaw = CHAIR_YAW;
+      this.play?.(CLIP.sitStill, true, { fade: 0.18 });
+      return;
+    }
+    this.sitPlant = null;
+    this.pose = "still";
+    this.play?.(CLIP.still, true, { fade: 0.18 });
   }
 
   private stopWalk() {

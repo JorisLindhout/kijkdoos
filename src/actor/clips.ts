@@ -1,14 +1,20 @@
 import type { ActionName } from "../brain/schema";
 
 export const CLIP = {
-  idle: "Stand_Still",
-  fidget: "Stand_Still",
+  idle: "Living_Idle",
+  still: "Stand_Still",
+  fidget: "Fidget",
   walk: "Walk_Loop",
   sit: "Sitting_Enter",
-  sitIdle: "Sitting_Enter",
+  sitIdle: "Sitting_Idle",
+  sitStill: "Sitting_Still",
+  sitFidget: "Sitting_Fidget",
+  sitLook: "Sitting_Look",
   stand: "Sitting_Exit",
   wave: "Waving",
   glare: "Glaring",
+  look: "Look_At_User",
+  emote: "Shrug",
   turnLeft: "Turn_Left",
   turnRight: "Turn_Right",
 } as const;
@@ -21,9 +27,13 @@ export type ClipId = (typeof CLIP)[keyof typeof CLIP];
 export function clipForAction(action: ActionName): { clip: ClipId; loop: boolean } | null {
   switch (action) {
     case "idle":
+      return { clip: CLIP.idle, loop: true };
+    case "still":
+      return { clip: CLIP.still, loop: true };
     case "fidget":
+      return { clip: CLIP.fidget, loop: false };
     case "look_at_user":
-      return { clip: CLIP.idle, loop: false };
+      return { clip: CLIP.look, loop: false };
     case "walk_to":
       return { clip: CLIP.walk, loop: true };
     case "sit":
@@ -33,8 +43,9 @@ export function clipForAction(action: ActionName): { clip: ClipId; loop: boolean
     case "wave":
       return { clip: CLIP.wave, loop: false };
     case "glare":
-    case "emote":
       return { clip: CLIP.glare, loop: false };
+    case "emote":
+      return { clip: CLIP.emote, loop: false };
     default:
       return null;
   }

@@ -7,9 +7,36 @@ npm install
 npm run dev
 ```
 
-Click floor to walk, chair to sit, character to glare. W wave, G glare, S sit, X stand.
+Click floor to walk, chair to sit, character to glare.
+
+| Key | Action |
+| --- | --- |
+| W | wave |
+| G | glare |
+| F | fidget |
+| L | look at you |
+| E | emote (shrug) |
+| I | still |
+| S | sit |
+| X | stand |
 
 Chair id is `chair-1` and stays that way.
+
+## Day and night
+
+The room mixes a warm day palette and a cool night palette from the viewer’s local clock.
+
+- Day 8:00–18:00
+- Night 20:30–5:30
+- Dawn 5:30–8:00 and dusk 18:00–20:30 ease between them
+
+Preview with `?hour=13` (day) or `?hour=1` (night).
+
+## Behaviours
+
+Standing and sitting both have a living idle (weight shift, look around) and **still** (frozen). He does not always move.
+
+The dummy brain can pick: `idle`, `still`, `fidget`, `walk_to`, `sit`, `stand`, `wave`, `glare`, `look_at_user`, `emote`. Turns happen locally while walking. Fidget, look, and still work in the chair too.
 
 ## Leftover
 

@@ -113,6 +113,118 @@ const GLARE: Pose = {
   },
 };
 
+function overlay(base: Pose, rot: JointMap, extra?: Partial<Omit<Pose, "rot">>): Pose {
+  return { ...base, ...extra, rot: { ...base.rot, ...rot } };
+}
+
+const IDLE_LEFT = overlay(
+  STAND,
+  {
+    torso: [3 * D, 5 * D, -2 * D],
+    neck: [2 * D, 4 * D, 0],
+    head: [3 * D, 10 * D, 0],
+    upperarm_l: [6 * D, 0, 16 * D],
+    lowerarm_l: [-12 * D, 0, 0],
+    upperarm_r: [-4 * D, 0, -10 * D],
+    thigh_l: [6 * D, 0, -5 * D],
+    thigh_r: [0, 0, 4 * D],
+  },
+  { hipsX: 3.5 * D },
+);
+
+const IDLE_BREATH = overlay(STAND, {
+  torso: [4 * D, 0, 0],
+  neck: [2 * D, 0, 0],
+  head: [2 * D, -4 * D, 0],
+  upperarm_l: [2 * D, 0, 14 * D],
+  upperarm_r: [2 * D, 0, -14 * D],
+});
+
+const IDLE_RIGHT = overlay(
+  STAND,
+  {
+    torso: [2 * D, -5 * D, 2 * D],
+    neck: [1 * D, -5 * D, 0],
+    head: [2 * D, -8 * D, 0],
+    upperarm_l: [-2 * D, 0, 10 * D],
+    upperarm_r: [4 * D, 0, -16 * D],
+    lowerarm_r: [-12 * D, 0, 0],
+    thigh_l: [0, 0, -4 * D],
+    thigh_r: [6 * D, 0, 5 * D],
+  },
+  { hipsX: -3.5 * D },
+);
+
+const FIDGET_SHIFT = overlay(
+  STAND,
+  {
+    torso: [4 * D, -8 * D, 3 * D],
+    head: [4 * D, 14 * D, 0],
+    upperarm_l: [8 * D, 0, 18 * D],
+    lowerarm_l: [-18 * D, 0, 0],
+    thigh_l: [8 * D, 0, -6 * D],
+    thigh_r: [-2 * D, 0, 4 * D],
+  },
+  { hipsX: 4 * D },
+);
+
+const FIDGET_SCRATCH = overlay(STAND, {
+  torso: [6 * D, -10 * D, 0],
+  neck: [8 * D, -8 * D, 4 * D],
+  head: [10 * D, -16 * D, 8 * D],
+  upperarm_r: [-42 * D, 18 * D, -100 * D],
+  lowerarm_r: [-78 * D, 0, -18 * D],
+  hand_r: [0, 0, -12 * D],
+  upperarm_l: [8 * D, 0, 14 * D],
+});
+
+const LOOK = overlay(STAND, {
+  torso: [8 * D, 0, 0],
+  neck: [10 * D, 0, 0],
+  head: [18 * D, 0, 0],
+  upperarm_l: [-4 * D, 0, 14 * D],
+  upperarm_r: [-4 * D, 0, -14 * D],
+});
+
+const SHRUG = overlay(STAND, {
+  torso: [6 * D, 0, 0],
+  neck: [4 * D, 0, 0],
+  head: [4 * D, 0, -14 * D],
+  upperarm_l: [12 * D, 0, 82 * D],
+  lowerarm_l: [8 * D, 0, 38 * D],
+  upperarm_r: [12 * D, 0, -82 * D],
+  lowerarm_r: [8 * D, 0, -38 * D],
+});
+
+const SIT_LOOK = overlay(SIT, {
+  torso: [8 * D, 10 * D, 0],
+  neck: [8 * D, 12 * D, 0],
+  head: [14 * D, 52 * D, 0],
+  upperarm_l: [-8 * D, 0, 12 * D],
+});
+
+const SIT_SHIFT = overlay(
+  SIT,
+  {
+    torso: [8 * D, -8 * D, 3 * D],
+    neck: [2 * D, -10 * D, 0],
+    head: [4 * D, -16 * D, 0],
+    upperarm_l: [-6 * D, 0, 14 * D],
+    upperarm_r: [-18 * D, 0, -8 * D],
+    lowerarm_r: [-48 * D, 0, 0],
+  },
+  { hipsX: 2 * D },
+);
+
+const SIT_FIDGET = overlay(SIT, {
+  torso: [10 * D, 6 * D, 0],
+  neck: [4 * D, 8 * D, 0],
+  head: [6 * D, 18 * D, 4 * D],
+  upperarm_r: [-28 * D, 8 * D, -70 * D],
+  lowerarm_r: [-55 * D, 0, -10 * D],
+  upperarm_l: [-8 * D, 0, 12 * D],
+});
+
 const TURN_WINDUP: Pose = {
   hipsY: HIP_HEIGHT - 0.03,
   hipsX: 3 * D,
@@ -212,6 +324,7 @@ const TURN_RIGHT_KEYS = TURN_LEFT_KEYS.map((key) => ({
   pose: mirrorPose(key.pose),
 }));
 
+export const STILL_DURATION = 18;
 export const WALK_DURATION = 1.2;
 export const WALK_HALF_STRIDE = 0.18;
 export const TURN_DURATION = 0.9;
@@ -219,7 +332,82 @@ export const SIT_DURATION = 0.85;
 export const STAND_DURATION = 0.75;
 
 export const CLIPS: Record<string, ClipDef> = {
-  Stand_Still: { kind: "keys", duration: 0.05, keys: keys([[0, STAND]]) },
+  Stand_Still: { kind: "keys", duration: STILL_DURATION, keys: keys([[0, STAND], [STILL_DURATION, STAND]]) },
+  Sitting_Still: { kind: "keys", duration: STILL_DURATION, keys: keys([[0, SIT], [STILL_DURATION, SIT]]) },
+  Living_Idle: {
+    kind: "keys",
+    duration: 4.8,
+    keys: keys([
+      [0, STAND],
+      [1.2, IDLE_LEFT],
+      [2.4, IDLE_BREATH],
+      [3.6, IDLE_RIGHT],
+      [4.8, STAND],
+    ]),
+  },
+  Fidget: {
+    kind: "keys",
+    duration: 2.15,
+    keys: keys([
+      [0, STAND],
+      [0.28, FIDGET_SHIFT],
+      [0.7, FIDGET_SCRATCH],
+      [1.15, FIDGET_SCRATCH],
+      [1.55, FIDGET_SHIFT],
+      [2.15, STAND],
+    ]),
+  },
+  Look_At_User: {
+    kind: "keys",
+    duration: 1.7,
+    keys: keys([
+      [0, STAND],
+      [0.32, LOOK],
+      [1.15, LOOK],
+      [1.7, STAND],
+    ]),
+  },
+  Shrug: {
+    kind: "keys",
+    duration: 1.45,
+    keys: keys([
+      [0, STAND],
+      [0.22, SHRUG],
+      [0.85, SHRUG],
+      [1.45, STAND],
+    ]),
+  },
+  Sitting_Idle: {
+    kind: "keys",
+    duration: 5.4,
+    keys: keys([
+      [0, SIT],
+      [1.3, SIT_SHIFT],
+      [2.6, SIT],
+      [3.8, SIT_LOOK],
+      [5.4, SIT],
+    ]),
+  },
+  Sitting_Look: {
+    kind: "keys",
+    duration: 1.8,
+    keys: keys([
+      [0, SIT],
+      [0.3, SIT_LOOK],
+      [1.25, SIT_LOOK],
+      [1.8, SIT],
+    ]),
+  },
+  Sitting_Fidget: {
+    kind: "keys",
+    duration: 2,
+    keys: keys([
+      [0, SIT],
+      [0.28, SIT_FIDGET],
+      [1.1, SIT_FIDGET],
+      [2, SIT],
+    ]),
+  },
   Walk_Loop: { kind: "walk", duration: WALK_DURATION },
   Sitting_Enter: {
     kind: "keys",

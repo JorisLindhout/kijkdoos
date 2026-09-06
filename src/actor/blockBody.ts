@@ -1,4 +1,5 @@
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from "three";
+import { hexInt, mixPalette, type Palette } from "../theme";
 
 /** Adult block person, ~1.69 m. Sizes are meters. */
 export const BODY = {
@@ -17,7 +18,7 @@ export const HIP_HEIGHT = BODY.foot.h + BODY.shin.h + BODY.thigh.h;
 export const STAND_HEIGHT =
   HIP_HEIGHT + BODY.torso.h + BODY.neck.h + BODY.head.h;
 /** Bump so Resident rebuilds the rig after bind changes. */
-export const RIG = 5;
+export const RIG = 6;
 
 export const JOINT_IDS = [
   "torso",
@@ -45,10 +46,17 @@ export type BlockPerson = {
   joints: Record<JointId, Group>;
 };
 
-const PAPER = 0xf2eee6;
-const WARM = 0xe8e0d4;
+type BodyRole = "paper" | "tone";
 
-function boxMesh(w: number, h: number, d: number, color: number, y: number, z = 0) {
+function boxMesh(
+  w: number,
+  h: number,
+  d: number,
+  color: number,
+  y: number,
+  z: number,
+  role: BodyRole,
+) {
   const mesh = new Mesh(
     new BoxGeometry(w, h, d),
     new MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.02 }),
@@ -56,14 +64,30 @@ function boxMesh(w: number, h: number, d: number, color: number, y: number, z = 
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.position.set(0, y, z);
+  mesh.userData.role = role;
   return mesh;
 }
 
-function hang(w: number, h: number, d: number, color: number) {
-  return boxMesh(w, h, d, color, -h / 2);
+function hang(w: number, h: number, d: number, color: number, role: BodyRole) {
+  return boxMesh(w, h, d, color, -h / 2, 0, role);
+}
+
+export function tintPerson(root: Group, palette: Palette) {
+  const paper = hexInt(palette.body.paper);
+  const tone = hexInt(palette.body.tone);
+  root.traverse((obj) => {
+    if (!(obj instanceof Mesh)) return;
+    const mat = obj.material;
+    if (!(mat instanceof MeshStandardMaterial)) return;
+    if (obj.userData.role === "tone") mat.color.setHex(tone);
+    else if (obj.userData.role === "paper") mat.color.setHex(paper);
+  });
 }
 
 export function createBlockPerson(): BlockPerson {
+  const palette = mixPalette();
+  const paper = hexInt(palette.body.paper);
+  const tone = hexInt(palette.body.tone);
   const { head, neck, torso, upperArm, forearm, hand, thigh, shin, foot } = BODY;
   const hipX = torso.w / 2 - thigh.w / 2;
 
@@ -74,17 +98,17 @@ export function createBlockPerson(): BlockPerson {
 
   const torsoJ = new Group();
   hips.add(torsoJ);
-  torsoJ.add(boxMesh(torso.w, torso.h, torso.d, WARM, torso.h / 2));
+  torsoJ.add(boxMesh(torso.w, torso.h, torso.d, tone, torso.h / 2, 0, "tone"));
 
   const neckJ = new Group();
   neckJ.position.y = torso.h;
   torsoJ.add(neckJ);
-  neckJ.add(boxMesh(neck.w, neck.h, neck.d, PAPER, neck.h / 2));
+  neckJ.add(boxMesh(neck.w, neck.h, neck.d, paper, neck.h / 2, 0, "paper"));
 
   const headJ = new Group();
   headJ.position.y = neck.h;
   neckJ.add(headJ);
-  headJ.add(boxMesh(head.w, head.h, head.d, PAPER, head.h / 2));
+  headJ.add(boxMesh(head.w, head.h, head.d, paper, head.h / 2, 0, "paper"));
 
   function arm(side: 1 | -1) {
     const upper = new Group();
@@ -94,17 +118,17 @@ export function createBlockPerson(): BlockPerson {
       0.02,
     );
     torsoJ.add(upper);
-    upper.add(hang(upperArm.w, upperArm.h, upperArm.d, PAPER));
+    upper.add(hang(upperArm.w, upperArm.h, upperArm.d, paper, "paper"));
 
     const lower = new Group();
     lower.position.y = -upperArm.h;
     upper.add(lower);
-    lower.add(hang(forearm.w, forearm.h, forearm.d, PAPER));
+    lower.add(hang(forearm.w, forearm.h, forearm.d, paper, "paper"));
 
     const handJ = new Group();
     handJ.position.y = -forearm.h;
     lower.add(handJ);
-    handJ.add(hang(hand.w, hand.h, hand.d, WARM));
+    handJ.add(hang(hand.w, hand.h, hand.d, tone, "tone"));
     return { upper, lower, handJ };
   }
 
@@ -112,17 +136,17 @@ export function createBlockPerson(): BlockPerson {
     const thighJ = new Group();
     thighJ.position.set(side * hipX, 0, 0);
     hips.add(thighJ);
-    thighJ.add(hang(thigh.w, thigh.h, thigh.d, PAPER));
+    thighJ.add(hang(thigh.w, thigh.h, thigh.d, paper, "paper"));
 
     const shinJ = new Group();
     shinJ.position.y = -thigh.h;
     thighJ.add(shinJ);
-    shinJ.add(hang(shin.w, shin.h, shin.d, PAPER));
+    shinJ.add(hang(shin.w, shin.h, shin.d, paper, "paper"));
 
     const footJ = new Group();
     footJ.position.y = -shin.h;
     shinJ.add(footJ);
-    footJ.add(boxMesh(foot.w, foot.h, foot.d, WARM, -foot.h / 2, foot.d * 0.22));
+    footJ.add(boxMesh(foot.w, foot.h, foot.d, tone, -foot.h / 2, foot.d * 0.22, "tone"));
     return { thighJ, shinJ, footJ };
   }
 
