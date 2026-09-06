@@ -1,6 +1,16 @@
 {
   "name": "Kijkdoos",
   "short_name": "Kijkdoos",
+  "description": "One person, a chair, a lamp. A life you keep by looking in. Close the tab and it waits. Not a session. A charge.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "en",
+  "dir": "ltr",
+  "background_color": "#060504",
+  "theme_color": "#060504",
+  "categories": ["games", "entertainment"],
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
@@ -14,8 +24,5 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ],
-  "theme_color": "#000000",
-  "background_color": "#000000",
-  "display": "standalone"
+  ]
 }
