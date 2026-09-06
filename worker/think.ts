@@ -28,17 +28,15 @@ const PLAN_JSON_SCHEMA = {
   properties: {
     action: { type: "string", enum: [...ACTIONS] },
     target: { type: "string" },
-    mood: { type: "string" },
-    say: { type: "string" },
   },
   required: ["action"],
 };
 
 const SYSTEM = `You are the director of a silent shoebox resident. Reply with JSON only:
-{"action":"...","target":"...","mood":"...","say":"..."}
+{"action":"...","target":"..."}
 action must be one of: idle, still, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote, push_chair, move_chair, kick_chair, light_on, light_off.
 target must be an id from the snapshot objects list, or omitted.
-Never invent objects. Prefer one action. Do not narrate.
+Never invent objects. Prefer one action. Do not narrate. Omit say, mood, and all other keys.
 Snapshot mood, visitCount, lightOn, visitSummary, failCount, backBlocked, and trappedChair are facts. Rearrange and lamp actions are rare.
 failedActions are plans that just failed in this room state. Do not pick them until the chair, lamp, or sit state changes.
 backBlocked means he cannot stand behind the chair. Pick kick_chair from the wall-facing side so the chair slides away from him into the room, then push_chair or move_chair. Never pick move_chair while trappedChair or backBlocked.
@@ -98,7 +96,7 @@ async function cfThink(env: Env, snapshot: Snapshot): Promise<Plan> {
       { role: "system", content: SYSTEM },
       { role: "user", content: JSON.stringify(snapshot) },
     ],
-    max_tokens: 128,
+    max_tokens: 64,
     temperature: 0.4,
     response_format: {
       type: "json_schema",
@@ -116,15 +114,11 @@ function parsePlan(value: unknown): Plan {
   return {
     action: rec.action,
     target: typeof rec.target === "string" ? rec.target : undefined,
-    mood: typeof rec.mood === "string" ? rec.mood : undefined,
-    say: typeof rec.say === "string" ? rec.say : undefined,
   };
 }
 
 function unwrapAi(value: unknown): unknown {
-  if (typeof value === "string") {
-    return JSON.parse(value);
-  }
+  if (typeof value === "string") return parseJsonish(value);
   const rec = asRecord(value);
   if (!rec) return value;
   if (typeof rec.action === "string") return rec;
@@ -135,6 +129,23 @@ function unwrapAi(value: unknown): unknown {
     if (message && "content" in message) return unwrapAi(message.content);
   }
   return value;
+}
+
+/** Llama often returns truncated or quote-broken JSON. Keep the action if it is already there. */
+function parseJsonish(text: string): unknown {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    /* fall through */
+  }
+  const action = /"action"\s*:\s*"([a-z_]+)"/.exec(trimmed);
+  if (!action || !isActionName(action[1])) return trimmed;
+  const target = /"target"\s*:\s*"([^"]*)"/.exec(trimmed);
+  return target ? { action: action[1], target: target[1] } : { action: action[1] };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

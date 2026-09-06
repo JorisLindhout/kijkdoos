@@ -1,4 +1,4 @@
-import type { ActionName, CatalogObject, Plan, Snapshot } from "../brain/schema";
+import type { ActionName, CatalogObject, Mood, Plan, Snapshot, VisitSummary } from "../brain/schema";
 import { CLIP, HOLD_START } from "./clips";
 import { BODY } from "./blockBody";
 import { STAND_DURATION, TURN_DURATION } from "./poses";
@@ -11,6 +11,7 @@ import {
   chairStandPoint,
   canWalkAway,
   clampWalls,
+  clearStepAlong,
   kickFacesOut,
   onChairBack,
   overlapsChair,
@@ -53,10 +54,11 @@ import {
 } from "../visit";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 67;
+export const ACTOR_LOGIC = 68;
 const STILL_MIN = 6;
 const STILL_MAX = 24;
-const TURN_THRESH = Math.PI * 0.55;
+const TURN_THRESH = Math.PI * 0.4;
+const DETOUR_TRIES = 2;
 const YAW_FOLLOW = 9;
 const PIVOT_X = BODY.torso.w / 2 - BODY.thigh.w / 2;
 
@@ -134,6 +136,7 @@ export class Controller {
   play: PlayClip | null = null;
   private walk: Walk | null = null;
   private path: FloorXZ[] = [];
+  private walkDest: FloorXZ | null = null;
   private footLock: { side: "l" | "r"; x: number; z: number } | null = null;
   private turning: Turn | null = null;
   private step: Step | null = null;
@@ -149,6 +152,7 @@ export class Controller {
   private contactWalkTries = 0;
   private afterKick: "push" | "move" | "recover" | "spite" | null = null;
   private recoverTries = 0;
+  private detourTries = 0;
   private lastMetrics: ShoeboxMetrics | null = null;
   private started = false;
   private hold = 0;
@@ -170,14 +174,129 @@ export class Controller {
       return;
     }
     this.started = true;
-    const spawn = floorPoint(metrics, 0.5, 0.45);
-    const [x, , z] = resolveFloor(spawn[0], spawn[2], metrics);
+    this.lastMetrics = metrics;
+    this.enterTableau(metrics);
+  }
+
+  /** Peeking in after time passed: a still-life, not the spawn square. */
+  private enterTableau(metrics: ShoeboxMetrics) {
+    const mood = getLiveMood();
+    const summary = getVisitSummary();
+    if (this.wantSitTableau(mood, summary)) {
+      this.seated = true;
+      this.snapToSeat(metrics);
+      noteVisitSit();
+      this.playSitTableau(mood);
+      return;
+    }
+    const [x, , z] = this.tableauFloor(metrics);
     this.x = x;
     this.z = z;
-    this.yaw = 0;
     this.y = 0;
-    this.lastMetrics = metrics;
-    this.holdStill();
+    this.playStandTableau(mood, metrics);
+  }
+
+  private wantSitTableau(mood: Mood, summary: VisitSummary) {
+    let chance = 0.28;
+    if (mood === "shy") chance = 0.55;
+    else if (mood === "angry") chance = 0.12;
+    else if (mood === "happy") chance = 0.4;
+    if (summary.neverSatLast10) chance *= 0.25;
+    return Math.random() < chance;
+  }
+
+  private tableauFloor(metrics: ShoeboxMetrics): [number, number, number] {
+    for (let i = 0; i < 14; i += 1) {
+      const at = randomClearFloor(metrics);
+      if (canWalkAway(at[0], at[2], metrics) && !overlapsChair(at[0], at[2], metrics)) {
+        return at;
+      }
+    }
+    const fallback = randomClearFloor(metrics);
+    if (!overlapsChair(fallback[0], fallback[2], metrics)) return fallback;
+    return chairStandPoint(metrics);
+  }
+
+  private playSitTableau(mood: Mood) {
+    const kind = pickWeighted<"still" | "look" | "idle" | "fidget">(
+      mood === "angry"
+        ? { still: 0.48, look: 0.24, idle: 0.18, fidget: 0.1 }
+        : mood === "shy"
+          ? { still: 0.5, idle: 0.28, look: 0.16, fidget: 0.06 }
+          : mood === "happy"
+            ? { idle: 0.4, fidget: 0.28, look: 0.2, still: 0.12 }
+            : { idle: 0.34, still: 0.3, look: 0.2, fidget: 0.16 },
+    );
+    if (kind === "still") {
+      this.record("still");
+      this.holdStill();
+      return;
+    }
+    if (kind === "look") {
+      this.record("look_at_user");
+      this.lookingAtUser = true;
+      this.seatedShot(CLIP.sitLook, "look");
+      return;
+    }
+    if (kind === "fidget") {
+      this.record("fidget");
+      this.fidget();
+      return;
+    }
+    this.record("idle");
+    this.playSitIdle();
+  }
+
+  private playStandTableau(mood: Mood, metrics: ShoeboxMetrics) {
+    const kind = pickWeighted<"still" | "idle" | "look" | "fidget" | "glare">(
+      mood === "angry"
+        ? { still: 0.32, glare: 0.28, look: 0.22, idle: 0.12, fidget: 0.06 }
+        : mood === "shy"
+          ? { still: 0.46, idle: 0.28, look: 0.18, fidget: 0.08 }
+          : mood === "happy"
+            ? { idle: 0.36, fidget: 0.24, look: 0.2, still: 0.2 }
+            : { still: 0.34, idle: 0.28, fidget: 0.2, look: 0.16, glare: 0.02 },
+    );
+    if (kind === "look" || kind === "glare") this.faceTowardCamera(metrics);
+    else if (mood === "shy") this.faceAwayFromCamera(metrics);
+    else this.faceWander();
+    if (kind === "still") {
+      this.record("still");
+      this.holdStill();
+      return;
+    }
+    if (kind === "look") {
+      this.record("look_at_user");
+      this.lookingAtUser = true;
+      this.pose = "look";
+      this.play?.(CLIP.look, false, { fade: 0 });
+      return;
+    }
+    if (kind === "glare") {
+      this.oneShot(CLIP.glare, "glare");
+      this.record("glare");
+      return;
+    }
+    if (kind === "fidget") {
+      this.record("fidget");
+      this.fidget();
+      return;
+    }
+    this.record("idle");
+    this.stillStand();
+  }
+
+  private faceTowardCamera(metrics: ShoeboxMetrics) {
+    this.yaw = wrapPi(Math.atan2(metrics.width / 2 - this.x, metrics.camDist - this.z));
+  }
+
+  private faceAwayFromCamera(metrics: ShoeboxMetrics) {
+    this.faceTowardCamera(metrics);
+    this.yaw = wrapPi(this.yaw + Math.PI + (Math.random() - 0.5) * 0.5);
+  }
+
+  private faceWander() {
+    this.yaw = wrapPi((Math.random() * 2 - 1) * Math.PI);
   }
 
   /** Keep floor UV when the shoebox morphs; seated snaps to the chair. */
@@ -239,6 +358,7 @@ export class Controller {
   private stillStand() {
     this.walk = null;
     this.path = [];
+    this.walkDest = null;
     this.footLock = null;
     this.turning = null;
     this.step = null;
@@ -255,6 +375,7 @@ export class Controller {
     this.pendingKick = false;
     this.afterKick = null;
     this.recoverTries = 0;
+    this.detourTries = 0;
     this.kickTries = 0;
     this.contactWalkTries = 0;
     this.lookingAtUser = false;
@@ -471,6 +592,7 @@ export class Controller {
     if (dist < 0.05) {
       this.x = this.walk.x;
       this.z = this.walk.z;
+      this.detourTries = 0;
       const nextHop = this.path.shift();
       if (nextHop) {
         this.walk = { x: nextHop.x, z: nextHop.z, onArrive: this.walk.onArrive };
@@ -497,7 +619,7 @@ export class Controller {
     if (!toSit && stepHitsChair(prevX, prevZ, this.x, this.z, metrics)) {
       this.x = prevX;
       this.z = prevZ;
-      this.stopWalk();
+      this.sidestepOrStop(metrics);
       return;
     }
     const [rx, , rz] = toSit
@@ -513,7 +635,7 @@ export class Controller {
     this.x = rx;
     this.z = rz;
     this.y = 0;
-    if (intended > 0.003 && along < 0.0015) this.stopWalk();
+    if (intended > 0.003 && along < 0.0015) this.sidestepOrStop(metrics);
   }
 
   private stepFromFoot(contact: WalkContact) {
@@ -576,10 +698,18 @@ export class Controller {
         preferFront,
         preferBack,
       );
-      const first = hops.shift();
+      this.detourTries = 0;
       this.footLock = null;
+      this.walkDest = { x, z };
+      const first = hops.shift();
+      if (!first) {
+        this.path = [];
+        this.walk = { x, z, onArrive };
+        this.sidestepOrStop(metrics);
+        return;
+      }
       this.path = hops;
-      this.walk = first ? { x: first.x, z: first.z, onArrive } : { x, z, onArrive };
+      this.walk = { x: first.x, z: first.z, onArrive };
       if (Math.hypot(this.walk.x - this.x, this.walk.z - this.z) < 0.05 && this.path.length === 0) {
         this.walk = null;
         if (onArrive) onArrive();
@@ -853,6 +983,56 @@ export class Controller {
       return;
     }
     this.stillStand();
+  }
+
+  private sidestepOrStop(metrics: ShoeboxMetrics) {
+    if (this.pendingSit || this.pendingChair || this.pendingKick || this.pendingLamp) {
+      this.stopWalk();
+      return;
+    }
+    if (this.detourTries >= DETOUR_TRIES) {
+      this.stopWalk();
+      return;
+    }
+    const left = wrapPi(this.yaw + Math.PI / 2);
+    const right = wrapPi(this.yaw - Math.PI / 2);
+    const goal = this.walkDest;
+    let best: { heading: number; point: FloorXZ } | null = null;
+    let bestScore = -1e9;
+    for (const heading of [left, right]) {
+      for (const dist of [0.48, 0.72]) {
+        const point = clearStepAlong(this.x, this.z, heading, dist, metrics);
+        if (!point) continue;
+        let score = Math.hypot(point.x - this.x, point.z - this.z);
+        if (goal) {
+          score +=
+            ((point.x - this.x) * (goal.x - this.x) + (point.z - this.z) * (goal.z - this.z)) * 0.35;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = { heading, point };
+        }
+      }
+    }
+    if (!best) {
+      this.stopWalk();
+      return;
+    }
+    this.detourTries += 1;
+    const onArrive = this.walk?.onArrive;
+    this.footLock = null;
+    this.walk = { x: best.point.x, z: best.point.z, onArrive };
+    this.path = [];
+    if (goal && Math.hypot(goal.x - best.point.x, goal.z - best.point.z) > 0.12) {
+      this.path = routeAroundChair(best.point, goal, metrics).filter(
+        (p) => Math.hypot(p.x - best.point.x, p.z - best.point.z) > 0.06,
+      );
+    }
+    this.faceThen(best.heading, () => {
+      if (!this.walk) return;
+      this.pose = "walk";
+      this.play?.(CLIP.walk, true, { fade: 0.08 });
+    });
   }
 
   private anchorToPlant(plant: FloorXZ, soles: FloorXZ) {
@@ -1449,6 +1629,17 @@ function wallOnly(
 ): [number, number, number] {
   const walls = clampWalls(x, z, metrics);
   return [walls.x, 0, walls.z];
+}
+
+function pickWeighted<T extends string>(weights: Partial<Record<T, number>>): T {
+  const entries = (Object.entries(weights) as [T, number][]).filter(([, w]) => w > 0);
+  const total = entries.reduce((sum, [, w]) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (const [key, w] of entries) {
+    roll -= w;
+    if (roll <= 0) return key;
+  }
+  return entries[entries.length - 1][0];
 }
 
 function wrapPi(angle: number) {

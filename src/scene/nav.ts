@@ -41,6 +41,12 @@ function chairHalf() {
   };
 }
 
+/** Chair box grown by the body radius so planned hops stay walkable. */
+function routeHalf() {
+  const { hx, hz } = chairHalf();
+  return { hx: hx + ACTOR_RADIUS, hz: hz + ACTOR_RADIUS };
+}
+
 function alongChair(
   metrics: ShoeboxMetrics,
   gap: number,
@@ -356,7 +362,7 @@ function segmentHitsObb(
 ): boolean {
   const a = chairLocal(ax, az, metrics);
   const b = chairLocal(bx, bz, metrics);
-  const { hx, hz } = chairHalf();
+  const { hx, hz } = routeHalf();
   return segmentHits(a.lx, a.lz, b.lx, b.lz, {
     minX: -hx,
     maxX: hx,
@@ -427,8 +433,8 @@ export function routeAroundChair(
     return [to];
   }
 
-  const { hx, hz } = chairHalf();
-  const e = 0.08;
+  const { hx, hz } = routeHalf();
+  const e = 0.06;
   const corners: FloorXZ[] = [
     chairWorld(-hx - e, -hz - e, metrics),
     chairWorld(hx + e, -hz - e, metrics),
@@ -454,7 +460,30 @@ export function routeAroundChair(
     if (!pathHitsObb(from, ba, metrics)) candidates.push(ba);
   }
 
-  const usable = candidates.length > 0 ? candidates : edges.map(([a, b]) => [a, b, to]);
+  if (candidates.length === 0) {
+    for (const c of corners) {
+      const [x, , z] = resolveFloor(c.x, c.z, metrics);
+      const hop = { x, z };
+      if (pathHitsObb(from, [hop], metrics)) continue;
+      candidates.push([hop, to]);
+    }
+  }
+  if (candidates.length === 0) {
+    let nearest: FloorXZ | null = null;
+    let nearestD = 1e9;
+    for (const c of corners) {
+      const [x, , z] = resolveFloor(c.x, c.z, metrics);
+      const hop = { x, z };
+      if (pathHitsObb(from, [hop], metrics)) continue;
+      const d = Math.hypot(hop.x - from.x, hop.z - from.z);
+      if (d > 0.08 && d < nearestD) {
+        nearest = hop;
+        nearestD = d;
+      }
+    }
+    return nearest ? [nearest] : [];
+  }
+  const usable = candidates;
   const { x: cx, z: cz, yaw } = chairLive(metrics);
   const f = chairFwd(yaw);
   const scored = usable.map((hops) => {
@@ -484,6 +513,23 @@ export function routeAroundChair(
       return { x, z };
     })
     .filter((p, i, all) => i === 0 || Math.hypot(p.x - all[i - 1].x, p.z - all[i - 1].z) > 0.06);
+}
+
+export function clearStepAlong(
+  x: number,
+  z: number,
+  heading: number,
+  dist: number,
+  metrics: ShoeboxMetrics,
+): FloorXZ | null {
+  const nx = x + Math.sin(heading) * dist;
+  const nz = z + Math.cos(heading) * dist;
+  if (stepHitsChair(x, z, nx, nz, metrics)) return null;
+  const [rx, , rz] = resolveFloor(nx, nz, metrics);
+  if (overlapsChair(rx, rz, metrics)) return null;
+  if (stepHitsChair(x, z, rx, rz, metrics)) return null;
+  if (Math.hypot(rx - x, rz - z) < dist * 0.55) return null;
+  return { x: rx, z: rz };
 }
 
 export function canTakeWalkStep(x: number, z: number, metrics: ShoeboxMetrics): boolean {
