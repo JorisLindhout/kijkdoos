@@ -233,6 +233,71 @@ export function pushAwayFromWall(metrics: ShoeboxMetrics, dist?: number): ChairU
   return null;
 }
 
+/** Slide the chair away from the kicker, biased into the room. Never toward his feet. */
+export function kickSlideFrom(
+  metrics: ShoeboxMetrics,
+  fromX: number,
+  fromZ: number,
+  dist?: number,
+): ChairUV | null {
+  const live = chairLive(metrics);
+  const dx = live.x - fromX;
+  const dz = live.z - fromZ;
+  const len = Math.hypot(dx, dz);
+  const kickH = len > 1e-4 ? Math.atan2(dx, dz) : wallInwardHeading(live.x, live.z, metrics);
+  const inward = wallInwardHeading(live.x, live.z, metrics);
+  const center = Math.atan2(metrics.width / 2 - live.x, -metrics.depth / 2 - live.z);
+  const prefer = [
+    mixHeading(kickH, inward, 0.35),
+    kickH,
+    mixHeading(kickH, inward, 0.55),
+    inward,
+    center,
+    kickH + 0.4,
+    kickH - 0.4,
+  ];
+  const distances = dist != null ? [dist] : [0.48, 0.36, 0.62, 0.26];
+  let best: { uv: ChairUV; score: number } | null = null;
+  for (const d of distances) {
+    for (const allowTrap of [false, true]) {
+      const uv = pushChairUV(metrics, { prefer, dist: d, allowTrap });
+      if (!uv) continue;
+      const score = kickSlideScore(metrics, uv, kickH, inward);
+      if (score == null) continue;
+      if (!best || score > best.score) best = { uv, score };
+      if (score > 0.55) return uv;
+    }
+  }
+  if (best && best.score > 0.12) return best.uv;
+  return null;
+}
+
+function mixHeading(a: number, b: number, t: number) {
+  const x = (1 - t) * Math.sin(a) + t * Math.sin(b);
+  const z = (1 - t) * Math.cos(a) + t * Math.cos(b);
+  return Math.atan2(x, z);
+}
+
+function kickSlideScore(
+  metrics: ShoeboxMetrics,
+  uv: ChairUV,
+  kickH: number,
+  inward: number,
+): number | null {
+  const live = chairLive(metrics);
+  const [nx, , nz] = floorPoint(metrics, uv.u, uv.v);
+  const mx = nx - live.x;
+  const mz = nz - live.z;
+  const moved = Math.hypot(mx, mz);
+  if (moved < 0.12) return null;
+  const moveH = Math.atan2(mx, mz);
+  const kickAlign = Math.cos(wrapPi(moveH - kickH));
+  const inAlign = Math.cos(wrapPi(moveH - inward));
+  if (kickAlign < -0.15) return null;
+  if (kickAlign < 0.12 && inAlign < 0.12) return null;
+  return kickAlign * 1.4 + Math.max(0, inAlign) * 0.6 + moved * 0.2;
+}
+
 function wallInwardHeading(x: number, z: number, metrics: ShoeboxMetrics) {
   const left = x;
   const right = metrics.width - x;

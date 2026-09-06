@@ -40,7 +40,7 @@ The dummy brain can pick: `idle`, `still`, `fidget`, `walk_to`, `sit`, `stand`, 
 
 ## Furniture and lamp
 
-Chair `chair-1` keeps a live pose (floor UV + yaw). Sit and stand use the open face (the seat). `push_chair` and `move_chair` walk behind the backrest, grab the top rail, then slide or turn. If he cannot get behind it (corner or wall), he `kick_chair`s the wall-facing side so the chair slides into the room, then tries the back grab again. Peak anger can kick even when the chair is not stuck. Poses that trapped him are stored and sent as `badChairPoses` / `trappedChair` / `backBlocked` so a later model can avoid them.
+Chair `chair-1` keeps a live pose (floor UV + yaw). Sit and stand use the open face (the seat). `push_chair` and `move_chair` walk behind the backrest, grab the top rail, then slide or turn. If he cannot get behind it (corner or wall), he `kick_chair`s from the wall-facing side so the chair slides away from him into the room, then tries the back grab again. If he is already on that side, he kicks from there instead of walking around. Peak anger can kick even when the chair is not stuck. Poses that trapped him are stored and sent as `badChairPoses` / `trappedChair` / `backBlocked` so a later model can avoid them.
 
 The hanging lamp can go off. He walks under the bulb and pulls the cord. The floor stays barely readable; it is never a black frame. Day/night still tints that dim fill.
 

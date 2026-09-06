@@ -34,9 +34,7 @@ export function dummyThink(snapshot: Snapshot): Plan {
   }
 
   if (standing && (snapshot.trappedChair || snapshot.backBlocked)) {
-    if (!skipped("kick_chair")) return { action: "kick_chair" };
-    if (!skipped("push_chair")) return { action: "push_chair" };
-    return { action: "still" };
+    return { action: "kick_chair" };
   }
 
   if (standing && peakAnger && !skipped("kick_chair") && !recent("kick_chair") && Math.random() < 0.04) {
