@@ -3,6 +3,8 @@ import { floorPoint, type ShoeboxMetrics } from "./shoebox";
 
 export const ACTOR_RADIUS = 0.18;
 export const WALL_PAD = 0.34;
+/** Close enough to kick the chair instead of walking first. */
+export const CHAIR_REACH = 0.85;
 const CHAIR_PAD = 0.04;
 /** Keep this much air between the body and the chair when leaving. */
 const CHAIR_LEAVE_GAP = 0.24;

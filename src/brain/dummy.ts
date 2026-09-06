@@ -33,7 +33,11 @@ export function dummyThink(snapshot: Snapshot): Plan {
     return { action: "glare" };
   }
 
-  if (standing && (snapshot.trappedChair || snapshot.backBlocked)) {
+  if (standing && snapshot.trappedChair && chairInReach(snapshot)) {
+    return { action: "kick_chair" };
+  }
+
+  if (standing && snapshot.backBlocked && chairInReach(snapshot) && !skipped("kick_chair")) {
     return { action: "kick_chair" };
   }
 
@@ -46,7 +50,7 @@ export function dummyThink(snapshot: Snapshot): Plan {
     if (lamp && !skipped(lamp.action)) return lamp;
   }
 
-  if (standing && !rearranged && !shy && Math.random() < 0.02) {
+  if (standing && !rearranged && !shy && Math.random() < 0.02 && !(snapshot.backBlocked && !chairInReach(snapshot))) {
     const canPush = !skipped("push_chair");
     const canMove = !skipped("move_chair");
     if (canPush && canMove) return { action: Math.random() < 0.5 ? "push_chair" : "move_chair" };
@@ -90,6 +94,14 @@ export function dummyThink(snapshot: Snapshot): Plan {
   }
 
   return { action: "still" };
+}
+
+function chairInReach(snapshot: Snapshot): boolean {
+  if (snapshot.chairInReach != null) return snapshot.chairInReach;
+  const chair = snapshot.objects.find((o) => o.affordances.includes("sit"));
+  if (!chair) return false;
+  const p = snapshot.character.pos;
+  return Math.hypot(chair.pos[0] - p[0], chair.pos[2] - p[2]) < 0.85;
 }
 
 function lampPlan(opts: {

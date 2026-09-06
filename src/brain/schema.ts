@@ -60,6 +60,7 @@ export type Snapshot = {
   failedActions?: string[];
   trappedChair?: boolean;
   backBlocked?: boolean;
+  chairInReach?: boolean;
   failCount?: number;
   badChairPoses?: { u: number; v: number; yaw: number }[];
 };
