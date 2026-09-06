@@ -553,9 +553,16 @@ export function canReachPoint(
   metrics: ShoeboxMetrics,
   preferBack = false,
 ): boolean {
-  if (Math.hypot(to.x - from.x, to.z - from.z) < 0.42) return true;
-  if (!canTakeWalkStep(from.x, from.z, metrics)) return false;
+  const dist = Math.hypot(to.x - from.x, to.z - from.z);
+  if (dist < 0.42) {
+    if (!stepHitsChair(from.x, from.z, to.x, to.z, metrics) && !segmentHitsObb(from.x, from.z, to.x, to.z, metrics)) {
+      return true;
+    }
+  } else if (!canTakeWalkStep(from.x, from.z, metrics)) {
+    return false;
+  }
   const hops = routeAroundChair(from, to, metrics, false, preferBack);
+  if (hops.length === 0) return false;
   const end = hops[hops.length - 1] ?? to;
   if (Math.hypot(end.x - to.x, end.z - to.z) > 0.35) return false;
   if (pathHitsObb(from, hops, metrics)) return false;

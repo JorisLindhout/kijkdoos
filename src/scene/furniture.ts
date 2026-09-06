@@ -269,7 +269,26 @@ export function kickSlideFrom(
     }
   }
   if (best && best.score > 0.12) return best.uv;
-  return null;
+  const away = pushAwayFromWall(metrics, dist ?? 0.36);
+  const kickIn = Math.cos(wrapPi(kickH - inward));
+  if (away) {
+    const score = kickSlideScore(metrics, away, kickH, inward);
+    if (score != null && score >= 0) return away;
+    if (kickIn > 0.12) return away;
+  }
+  const { u, v } = floorUV(
+    metrics,
+    live.x + Math.sin(inward) * 0.42,
+    live.z + Math.cos(inward) * 0.42,
+  );
+  const safe = clampChairUV({ u, v, yaw: live.yaw }, metrics);
+  const [sx, , sz] = floorPoint(metrics, safe.u, safe.v);
+  const mx = sx - live.x;
+  const mz = sz - live.z;
+  if (Math.hypot(mx, mz) < 0.1) return kickIn > 0.12 ? away : null;
+  const moveH = Math.atan2(mx, mz);
+  if (Math.cos(wrapPi(moveH - kickH)) < -0.15) return kickIn > 0.12 ? away : null;
+  return safe;
 }
 
 function mixHeading(a: number, b: number, t: number) {

@@ -5,7 +5,6 @@ import { STAND_DURATION, TURN_DURATION } from "./poses";
 import {
   backReachable,
   behindChair,
-  canReachPoint,
   chairBackPoint,
   chairKickPoint,
   chairStandPoint,
@@ -54,11 +53,12 @@ import {
 } from "../visit";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 68;
+export const ACTOR_LOGIC = 69;
 const STILL_MIN = 6;
 const STILL_MAX = 24;
 const TURN_THRESH = Math.PI * 0.4;
 const DETOUR_TRIES = 2;
+const KICK_NEAR = 0.85;
 const YAW_FOLLOW = 9;
 const PIVOT_X = BODY.torso.w / 2 - BODY.thigh.w / 2;
 
@@ -153,6 +153,8 @@ export class Controller {
   private afterKick: "push" | "move" | "recover" | "spite" | null = null;
   private recoverTries = 0;
   private detourTries = 0;
+  private afterTick: (() => void) | null = null;
+  private kickDepth = 0;
   private lastMetrics: ShoeboxMetrics | null = null;
   private started = false;
   private hold = 0;
@@ -378,6 +380,8 @@ export class Controller {
     this.detourTries = 0;
     this.kickTries = 0;
     this.contactWalkTries = 0;
+    this.afterTick = null;
+    this.kickDepth = 0;
     this.lookingAtUser = false;
     this.quiet = 0;
     this.pose = "idle";
@@ -527,6 +531,7 @@ export class Controller {
       this.pendingChair ||
       this.pendingKick ||
       this.recoverTries > 0 ||
+      this.afterTick !== null ||
       this.walk !== null ||
       this.chairTween !== null ||
       this.pose === "walk" ||
@@ -549,6 +554,12 @@ export class Controller {
     if (soles) this.lastSoles = soles;
     this.energy = Math.min(1, Math.max(0.05, this.energy - 0.008 * dt));
     if (this.quiet > 0) this.quiet = Math.max(0, this.quiet - dt);
+    const later = this.afterTick;
+    this.afterTick = null;
+    if (later) {
+      later();
+      return;
+    }
     if (
       !this.seated &&
       !this.pendingSit &&
@@ -704,8 +715,9 @@ export class Controller {
       const first = hops.shift();
       if (!first) {
         this.path = [];
-        this.walk = { x, z, onArrive };
-        this.sidestepOrStop(metrics);
+        this.walk = null;
+        if (onArrive) onArrive();
+        else this.stillStand();
         return;
       }
       this.path = hops;
@@ -945,19 +957,17 @@ export class Controller {
     this.play?.(CLIP.still, true, { fade: 0.18 });
   }
 
+  private defer(fn: () => void) {
+    this.afterTick = fn;
+  }
+
   private stopWalk() {
     if (this.pendingSit && this.lastMetrics && this.nearStand(this.lastMetrics)) {
       this.prepareSit();
       return;
     }
     if (this.pendingKick && this.lastMetrics) {
-      if (this.canKickHere(this.lastMetrics)) this.startKick();
-      else if (this.contactWalkTries++ < 2) {
-        const at = chairKickPoint(this.lastMetrics, { x: this.x, z: this.z });
-        this.goTo(at, this.lastMetrics, () => this.startKick(), false, behindChair(at[0], at[2], this.lastMetrics));
-      } else if (this.isTrapped(this.lastMetrics) || kickFacesOut(this.x, this.z, this.lastMetrics)) {
-        this.startKick();
-      } else this.stillStand();
+      this.finishKickApproach(this.lastMetrics);
       return;
     }
     if (this.pendingChair && this.pendingChairTo && this.lastMetrics) {
@@ -966,27 +976,57 @@ export class Controller {
         this.contactWalkTries = 0;
         this.contactThenTween(dest.to, dest.kind);
       } else if (this.contactWalkTries++ < 2) {
-        this.goTo(
-          chairBackPoint(this.lastMetrics),
-          this.lastMetrics,
-          () => this.contactThenTween(dest.to, dest.kind),
-          false,
-          true,
+        const metrics = this.lastMetrics;
+        this.defer(() =>
+          this.goTo(
+            chairBackPoint(metrics),
+            metrics,
+            () => this.contactThenTween(dest.to, dest.kind),
+            false,
+            true,
+          ),
         );
       } else {
-        this.kickChair(this.lastMetrics, dest.kind);
+        const metrics = this.lastMetrics;
+        this.defer(() => this.kickChair(metrics, dest.kind));
       }
       return;
     }
     if (this.lastMetrics && this.isTrapped(this.lastMetrics)) {
-      if (!this.kickChair(this.lastMetrics, "recover")) this.stillStand();
+      const metrics = this.lastMetrics;
+      this.defer(() => {
+        if (!this.kickChair(metrics, "recover")) this.stillStand();
+      });
       return;
     }
     this.stillStand();
   }
 
+  private finishKickApproach(metrics: ShoeboxMetrics) {
+    if (
+      this.canKickHere(metrics) ||
+      kickFacesOut(this.x, this.z, metrics) ||
+      behindChair(this.x, this.z, metrics) ||
+      this.nearChair(metrics) ||
+      this.contactWalkTries >= 1
+    ) {
+      this.startKick();
+      return;
+    }
+    this.contactWalkTries += 1;
+    const at = chairKickPoint(metrics, { x: this.x, z: this.z });
+    this.defer(() =>
+      this.goTo(at, metrics, () => this.startKick(), false, behindChair(at[0], at[2], metrics)),
+    );
+  }
+
+  private nearChair(metrics: ShoeboxMetrics) {
+    const live = chairLive(metrics);
+    return Math.hypot(live.x - this.x, live.z - this.z) < KICK_NEAR;
+  }
+
   private sidestepOrStop(metrics: ShoeboxMetrics) {
-    if (this.pendingSit || this.pendingChair || this.pendingKick || this.pendingLamp) {
+    if (this.pendingSit || this.pendingLamp) {
       this.stopWalk();
       return;
     }
@@ -996,10 +1036,12 @@ export class Controller {
     }
     const left = wrapPi(this.yaw + Math.PI / 2);
     const right = wrapPi(this.yaw - Math.PI / 2);
+    const live = chairLive(metrics);
+    const away = Math.atan2(this.x - live.x, this.z - live.z);
     const goal = this.walkDest;
     let best: { heading: number; point: FloorXZ } | null = null;
     let bestScore = -1e9;
-    for (const heading of [left, right]) {
+    for (const heading of [left, right, away]) {
       for (const dist of [0.48, 0.72]) {
         const point = clearStepAlong(this.x, this.z, heading, dist, metrics);
         if (!point) continue;
@@ -1008,6 +1050,7 @@ export class Controller {
           score +=
             ((point.x - this.x) * (goal.x - this.x) + (point.z - this.z) * (goal.z - this.z)) * 0.35;
         }
+        if (kickFacesOut(point.x, point.z, metrics)) score += 0.4;
         if (score > bestScore) {
           bestScore = score;
           best = { heading, point };
@@ -1256,35 +1299,38 @@ export class Controller {
   }
 
   private kickChair(metrics: ShoeboxMetrics, after: "push" | "move" | "recover" | "spite" = "spite") {
+    if (this.kickDepth > 1) return false;
     if (this.seated) {
       this.stand(() => {
         if (!this.kickChair(metrics, after)) this.noteFail("kick_chair");
       });
       return true;
     }
-    this.failedAt.delete("kick_chair");
-    this.pendingSit = false;
-    this.pendingLamp = false;
-    this.afterKick = after;
-    this.pendingChair = true;
-    this.pendingKick = true;
-    const at = chairKickPoint(metrics, { x: this.x, z: this.z });
-    const preferBack = behindChair(at[0], at[2], metrics);
-    if (this.canKickHere(metrics)) {
+    this.kickDepth += 1;
+    try {
+      this.failedAt.delete("kick_chair");
+      this.pendingSit = false;
+      this.pendingLamp = false;
+      this.afterKick = after;
+      this.pendingChair = true;
+      this.pendingKick = true;
+      if (
+        this.canKickHere(metrics) ||
+        kickFacesOut(this.x, this.z, metrics) ||
+        behindChair(this.x, this.z, metrics)
+      ) {
+        return this.beginKick();
+      }
+      const at = chairKickPoint(metrics, { x: this.x, z: this.z });
+      const preferBack = behindChair(at[0], at[2], metrics);
+      if (!this.isTrapped(metrics)) {
+        this.goTo(at, metrics, () => this.startKick(), false, preferBack);
+        return true;
+      }
       return this.beginKick();
+    } finally {
+      this.kickDepth -= 1;
     }
-    if (
-      !this.isTrapped(metrics) &&
-      canReachPoint({ x: this.x, z: this.z }, { x: at[0], z: at[2] }, metrics, preferBack)
-    ) {
-      this.goTo(at, metrics, () => this.startKick(), false, preferBack);
-      return true;
-    }
-    if (kickFacesOut(this.x, this.z, metrics) || this.isTrapped(metrics)) {
-      return this.beginKick();
-    }
-    this.goTo(at, metrics, () => this.startKick(), false, preferBack);
-    return true;
   }
 
   private canKickHere(metrics: ShoeboxMetrics) {
@@ -1295,7 +1341,10 @@ export class Controller {
   }
 
   private startKick() {
-    if (!this.beginKick()) this.stillStand();
+    if (this.beginKick()) return;
+    const metrics = this.lastMetrics;
+    if (metrics && this.kickTowardDefault(metrics)) return;
+    this.stillStand();
   }
 
   private roomState() {
@@ -1334,7 +1383,7 @@ export class Controller {
       this.z = z;
       this.y = 0;
       if (overlapsChair(x, z, metrics)) {
-        this.kickChair(metrics, kind);
+        this.defer(() => this.kickChair(metrics, kind));
         return;
       }
     }
@@ -1496,12 +1545,14 @@ export class Controller {
       }
       return;
     }
-    if (!this.kickChair(metrics, after ?? "spite")) {
-      if (!this.kickTowardDefault(metrics)) {
-        this.kickTries = 0;
-        this.stillStand();
+    this.defer(() => {
+      if (!this.kickChair(metrics, after ?? "spite")) {
+        if (!this.kickTowardDefault(metrics)) {
+          this.kickTries = 0;
+          this.stillStand();
+        }
       }
-    }
+    });
   }
 
   private kickTowardDefault(metrics: ShoeboxMetrics) {
@@ -1570,16 +1621,20 @@ export class Controller {
     this.noteFail("move_chair");
     this.record("kick_chair");
     if (this.recoverTries > 8) {
-      if (!this.kickTowardDefault(metrics) && !this.kickChair(metrics, "recover")) {
-        this.recoverTries = 0;
-        this.kickTries = 0;
-        this.stillStand();
-      }
+      this.defer(() => {
+        if (!this.kickTowardDefault(metrics) && !this.kickChair(metrics, "recover")) {
+          this.recoverTries = 0;
+          this.kickTries = 0;
+          this.stillStand();
+        }
+      });
       return;
     }
-    if (!this.kickChair(metrics, "recover")) {
-      if (!this.kickTowardDefault(metrics)) this.stillStand();
-    }
+    this.defer(() => {
+      if (!this.kickChair(metrics, "recover")) {
+        if (!this.kickTowardDefault(metrics)) this.stillStand();
+      }
+    });
   }
 
   private isTrapped(metrics: ShoeboxMetrics) {
