@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" fill="none"><metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/"><rdf:Description><dc:creator>RealFaviconGenerator</dc:creator><dc:source>https://realfavicongenerator.net</dc:source></rdf:Description></rdf:RDF></metadata><g clip-path="url(#clip0_5013_33)">
+<rect width="200" height="200" fill="white"></rect>
+<path d="M200.5 0L146 54.5L146 145.5L200.5 200L200.5 0Z" fill="#3E3424" stroke="#3E3424"></path>
+<path d="M-1 200L53.5 145.5L53.5 54.4998L-0.999998 0.000106812L-1 200Z" fill="#3E3424" stroke="#3E3424"></path>
+<path d="M54 54H146V146H54V54Z" fill="#332A1C"></path>
+<path d="M146 54H145.5V146H146H146.5V54H146ZM54 146H54.5V54H54H53.5V146H54Z" fill="black"></path>
+<path d="M-4.5 -4.5L54.5 54.5H145.5L205 -4.5H-4.5Z" fill="#241E14" stroke="black"></path>
+<path d="M204 204L145.5 145L54.5 145L-3 203L204 204Z" fill="#5C4E34" stroke="black"></path>
+</g><defs>
+<clipPath id="clip0_5013_33">
+<rect width="200" height="200" fill="white"></rect>
+</clipPath>
+</defs></svg>
