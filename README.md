@@ -60,9 +60,9 @@ The dummy weights glare, sit, wave, still, the lamp, and kicks from those counts
 ## Leftover
 
 - Pose polish (arms, sit, walk)
-- `BRAIN=ollama` — Worker path exists; default is dummy. Model `llama3.1:8b-instruct`
+- Pose polish (arms, sit, walk)
 - Chair mesh swap — same id `chair-1`
-- Cloudflare deploy — `npm run deploy`
+- Cloudflare deploy — `npm run deploy`. Local `BRAIN=cf` uses Workers AI `@cf/meta/llama-3.1-8b-instruct-fast` with dummy fallback.
 
 ## Not now
 

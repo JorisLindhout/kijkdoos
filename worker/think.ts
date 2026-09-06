@@ -1,9 +1,37 @@
 import { dummyThink } from "../src/brain/dummy";
-import { isActionName, type Plan, type Snapshot } from "../src/brain/schema";
+import { ACTIONS, isActionName, type Plan, type Snapshot } from "../src/brain/schema";
 
 type Env = {
-  BRAIN: "dummy" | "ollama" | "cf";
-  OLLAMA_URL: string;
+  BRAIN: "dummy" | "cf";
+  AI: AiBinding;
+};
+
+type AiBinding = {
+  run(
+    model: string,
+    inputs: {
+      messages: { role: string; content: string }[];
+      max_tokens?: number;
+      temperature?: number;
+      response_format?: {
+        type: "json_schema";
+        json_schema: Record<string, unknown>;
+      };
+    },
+  ): Promise<unknown>;
+};
+
+const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+
+const PLAN_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: [...ACTIONS] },
+    target: { type: "string" },
+    mood: { type: "string" },
+    say: { type: "string" },
+  },
+  required: ["action"],
 };
 
 const SYSTEM = `You are the director of a silent shoebox resident. Reply with JSON only:
@@ -53,42 +81,63 @@ export default {
 };
 
 async function think(env: Env, snapshot: Snapshot): Promise<Plan> {
-  if (env.BRAIN === "ollama") {
+  if (env.BRAIN === "cf") {
     try {
-      return await ollamaThink(env, snapshot);
-    } catch {
+      return await cfThink(env, snapshot);
+    } catch (err) {
+      console.error("cf think failed", err);
       return dummyThink(snapshot);
     }
   }
   return dummyThink(snapshot);
 }
 
-async function ollamaThink(env: Env, snapshot: Snapshot): Promise<Plan> {
-  const response = await fetch(`${env.OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "llama3.1:8b-instruct",
-      stream: false,
-      format: "json",
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: JSON.stringify(snapshot) },
-      ],
-    }),
+async function cfThink(env: Env, snapshot: Snapshot): Promise<Plan> {
+  const data = await env.AI.run(MODEL, {
+    messages: [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: JSON.stringify(snapshot) },
+    ],
+    max_tokens: 128,
+    temperature: 0.4,
+    response_format: {
+      type: "json_schema",
+      json_schema: PLAN_JSON_SCHEMA,
+    },
   });
-  if (!response.ok) {
-    throw new Error("ollama failed");
-  }
-  const data = (await response.json()) as { message?: { content?: string } };
-  const parsed = JSON.parse(data.message?.content ?? "{}") as Partial<Plan>;
-  if (!parsed.action || !isActionName(parsed.action)) {
+  return parsePlan(data);
+}
+
+function parsePlan(value: unknown): Plan {
+  const rec = asRecord(unwrapAi(value));
+  if (!rec || typeof rec.action !== "string" || !isActionName(rec.action)) {
     throw new Error("bad plan");
   }
   return {
-    action: parsed.action,
-    target: parsed.target,
-    mood: parsed.mood,
-    say: parsed.say,
+    action: rec.action,
+    target: typeof rec.target === "string" ? rec.target : undefined,
+    mood: typeof rec.mood === "string" ? rec.mood : undefined,
+    say: typeof rec.say === "string" ? rec.say : undefined,
   };
+}
+
+function unwrapAi(value: unknown): unknown {
+  if (typeof value === "string") {
+    return JSON.parse(value);
+  }
+  const rec = asRecord(value);
+  if (!rec) return value;
+  if (typeof rec.action === "string") return rec;
+  if ("response" in rec) return unwrapAi(rec.response);
+  const choices = rec.choices;
+  if (Array.isArray(choices)) {
+    const message = asRecord(asRecord(choices[0])?.message);
+    if (message && "content" in message) return unwrapAi(message.content);
+  }
+  return value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
 }
