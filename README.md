@@ -184,7 +184,3 @@ npm run deploy
 `vite build` (Cloudflare plugin) then `wrangler deploy`. Worker name `kijkdoos`. Assets are the SPA; only `/api/*` runs the worker first. The AI binding is remote.
 
 Switch brains with `"BRAIN": "dummy"` or `"cf"` in `wrangler.jsonc` vars.
-
-## Out of scope
-
-No skinned meshes, Mixamo/UAL, Blender pipeline, physics, voice, faces, sleep, or multiplayer. No client-side brain. Catalog is chair + lamp only.
