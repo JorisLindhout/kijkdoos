@@ -52,6 +52,12 @@ export type CatalogObject = {
   seatHeight?: number;
 };
 
+/** One issued plan. Target is only for object verbs. */
+export type PlanTrace = {
+  action: ActionName;
+  target?: string;
+};
+
 export type Snapshot = {
   sceneVersion: number;
   objects: CatalogObject[];
@@ -62,7 +68,7 @@ export type Snapshot = {
     energy?: number;
     pos: [number, number, number];
   };
-  lastActions: string[];
+  lastActions: PlanTrace[];
   user: {
     stareSeconds?: number;
     poked?: boolean;
@@ -71,7 +77,7 @@ export type Snapshot = {
   visitCount?: number;
   lightOn?: boolean;
   visitSummary?: VisitSummary;
-  failedActions?: string[];
+  failedActions?: PlanTrace[];
   trappedChair?: boolean;
   backBlocked?: boolean;
   chairInReach?: boolean;
@@ -85,6 +91,10 @@ export type Plan = {
   mood?: string;
   say?: string;
 };
+
+export function planTrace(action: ActionName, target?: string): PlanTrace {
+  return target ? { action, target } : { action };
+}
 
 export function isActionName(value: string): value is ActionName {
   return (ACTIONS as readonly string[]).includes(value);
@@ -120,10 +130,25 @@ export function lampAffordances(lightOn: boolean): string[] {
   return lightOn ? ["light_off"] : ["light_on"];
 }
 
-export function offering(objects: CatalogObject[], verb: string, target?: string): CatalogObject | undefined {
-  return objects.find(
+export function offerings(
+  objects: CatalogObject[],
+  verb: string,
+  target?: string,
+): CatalogObject[] {
+  return objects.filter(
     (object) => (!target || object.id === target) && object.affordances.includes(verb),
   );
+}
+
+/** Unique match, or the named target. Does not guess among several objects. */
+export function offering(
+  objects: CatalogObject[],
+  verb: string,
+  target?: string,
+): CatalogObject | undefined {
+  const matches = offerings(objects, verb, target);
+  if (target) return matches[0];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function normalizePlan(raw: { action: string; target?: string }): Plan | null {
@@ -131,7 +156,6 @@ export function normalizePlan(raw: { action: string; target?: string }): Plan | 
   if (isObjectVerb(raw.action)) {
     return { action: raw.action, target: raw.target };
   }
-  if (raw.action === "walk_to" && raw.target) return { action: raw.action, target: raw.target };
   return { action: raw.action };
 }
 
@@ -143,11 +167,40 @@ export function withObjectTarget(plan: Plan, objects: CatalogObject[]): Plan {
 
 export function isAdvertisedPlan(plan: Plan, snapshot: Snapshot): boolean {
   if (plan.action === "stand") return !!snapshot.character.seated;
-  if (isSelfAction(plan.action)) {
-    if (plan.action === "walk_to" && plan.target) {
-      return snapshot.objects.some((object) => object.id === plan.target);
-    }
-    return !plan.target;
-  }
+  if (isSelfAction(plan.action)) return !plan.target;
+  if (!plan.target) return false;
   return !!offering(snapshot.objects, plan.action, plan.target);
+}
+
+export function tracesOf(entries: Array<PlanTrace | string> | undefined): PlanTrace[] {
+  if (!entries) return [];
+  return entries.map((entry) => {
+    if (typeof entry !== "string") return entry;
+    const cut = entry.indexOf(":");
+    if (cut <= 0 || !isActionName(entry.slice(0, cut))) {
+      return { action: (isActionName(entry) ? entry : "idle") as ActionName };
+    }
+    return { action: entry.slice(0, cut) as ActionName, target: entry.slice(cut + 1) };
+  });
+}
+
+export function recentPlan(
+  entries: Array<PlanTrace | string> | undefined,
+  action: string,
+  target?: string,
+  window = 5,
+) {
+  return tracesOf(entries)
+    .slice(-window)
+    .some((entry) => entry.action === action && (!target || entry.target === target));
+}
+
+export function failedPlan(
+  entries: Array<PlanTrace | string> | undefined,
+  action: string,
+  target?: string,
+) {
+  return tracesOf(entries).some(
+    (entry) => entry.action === action && (!entry.target || !target || entry.target === target),
+  );
 }

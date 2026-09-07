@@ -1,7 +1,11 @@
 import {
+  failedPlan,
   isPeakAngerState,
-  offering,
+  offerings,
+  recentPlan,
+  tracesOf,
   PEAK_SHORT_STREAK,
+  type CatalogObject,
   type Plan,
   type Snapshot,
 } from "./schema";
@@ -11,13 +15,18 @@ const PEAK_KICK = 0.12;
 const REARRANGE = new Set(["push", "move", "kick"]);
 const LAMP = new Set(["light_on", "light_off"]);
 
+function pickOffering(objects: CatalogObject[], verb: string): CatalogObject | undefined {
+  const matches = offerings(objects, verb);
+  if (!matches.length) return undefined;
+  return matches[Math.floor(Math.random() * matches.length)];
+}
+
 export function dummyThink(snapshot: Snapshot): Plan {
   const pose = snapshot.character.pose;
-  const last = snapshot.lastActions;
-  const failed = new Set(snapshot.failedActions ?? []);
-  const recent = (action: string) => last.slice(-5).includes(action);
-  const skipped = (action: string) => failed.has(action);
-  const use = (verb: string) => offering(snapshot.objects, verb);
+  const last = tracesOf(snapshot.lastActions);
+  const recent = (action: string, target?: string) => recentPlan(last, action, target);
+  const skipped = (action: string, target?: string) => failedPlan(snapshot.failedActions, action, target);
+  const use = (verb: string) => pickOffering(snapshot.objects, verb);
   const stare = snapshot.user.stareSeconds ?? 0;
   const mood = snapshot.mood ?? snapshot.character.mood ?? "calm";
   const summary = snapshot.visitSummary;
@@ -33,8 +42,10 @@ export function dummyThink(snapshot: Snapshot): Plan {
   const pokedOften = (summary?.pokeRateLast10 ?? 0) >= 3;
   const rearranged = last
     .slice(-6)
-    .some((action) => REARRANGE.has(action) && !failed.has(action));
-  const lampRecent = last.slice(-4).some((action) => LAMP.has(action) && !failed.has(action));
+    .some((entry) => REARRANGE.has(entry.action) && !skipped(entry.action, entry.target));
+  const lampRecent = last
+    .slice(-4)
+    .some((entry) => LAMP.has(entry.action) && !skipped(entry.action, entry.target));
   const chairKick = use("kick");
   const chairPush = use("push");
   const chairMove = use("move");
@@ -50,7 +61,7 @@ export function dummyThink(snapshot: Snapshot): Plan {
     return { action: "kick", target: chairKick.id };
   }
 
-  if (standing && chairKick && peakAnger && !skipped("kick") && !recent("kick") && Math.random() < PEAK_KICK) {
+  if (standing && chairKick && peakAnger && !skipped("kick", chairKick.id) && !recent("kick", chairKick.id) && Math.random() < PEAK_KICK) {
     return { action: "kick", target: chairKick.id };
   }
 
@@ -63,12 +74,12 @@ export function dummyThink(snapshot: Snapshot): Plan {
       angryStreak,
       darkHabit,
     });
-    if (lamp && !skipped(lamp.action)) return lamp;
+    if (lamp && !skipped(lamp.action, lamp.target)) return lamp;
   }
 
   if (standing && !rearranged && !shy && Math.random() < 0.02) {
-    const push = chairPush && !skipped("push") ? chairPush : null;
-    const move = chairMove && !skipped("move") ? chairMove : null;
+    const push = chairPush && !skipped("push", chairPush.id) ? chairPush : null;
+    const move = chairMove && !skipped("move", chairMove.id) ? chairMove : null;
     if (push && move) {
       return Math.random() < 0.5
         ? { action: "push", target: push.id }
@@ -89,7 +100,7 @@ export function dummyThink(snapshot: Snapshot): Plan {
   }
 
   const sitChance = neverSat ? 0.03 : shy ? 0.06 : 0.1;
-  if (chairSit && !recent("sit") && Math.random() < sitChance) {
+  if (chairSit && !recent("sit", chairSit.id) && Math.random() < sitChance) {
     return { action: "sit", target: chairSit.id };
   }
 
@@ -110,6 +121,7 @@ export function dummyThink(snapshot: Snapshot): Plan {
     if (pick < stillCut + 0.22 + glareBoost) return { action: "emote" };
     if (waveCut && pick < stillCut + 0.22 + glareBoost + waveCut) return { action: "wave" };
     if (pick < stillCut + 0.28 + glareBoost + waveCut) return { action: "idle" };
+    if (recent("walk_to")) return { action: "still" };
     return { action: "walk_to" };
   }
 

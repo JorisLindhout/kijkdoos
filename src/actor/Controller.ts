@@ -1,9 +1,19 @@
-import type { ActionName, CatalogObject, Mood, Plan, Snapshot, VisitSummary } from "../brain/schema";
+import type {
+  ActionName,
+  CatalogObject,
+  Mood,
+  Plan,
+  PlanTrace,
+  Snapshot,
+  VisitSummary,
+} from "../brain/schema";
 import {
   chairAffordances,
+  failedPlan,
   isAdvertisedPlan,
   lampAffordances,
   normalizePlan,
+  planTrace,
   withObjectTarget,
 } from "../brain/schema";
 import { CLIP, HOLD_START } from "./clips";
@@ -66,9 +76,11 @@ import {
 } from "../visit";
 
 export const THOUGHT_CAP = 40;
-export const ACTOR_LOGIC = 76;
+export const ACTOR_LOGIC = 77;
 const STILL_MIN = 12;
 const STILL_MAX = 36;
+const WALK_REST_MIN = 8;
+const WALK_REST_MAX = 18;
 const TURN_THRESH = Math.PI * 0.4;
 const DETOUR_TRIES = 2;
 const YAW_FOLLOW = 9;
@@ -139,7 +151,7 @@ export class Controller {
   pose: ActorPose = "idle";
   seated = false;
   lookingAtUser = false;
-  lastActions: string[] = [];
+  lastActions: PlanTrace[] = [];
   sceneVersion = 1;
   thoughts = 0;
   energy = 0.72;
@@ -402,6 +414,12 @@ export class Controller {
     this.play?.(CLIP.still, true, { fade: 0.18 });
   }
 
+  /** Wander is done: freeze long enough that the next think cannot reissue walk_to. */
+  private restAfterWalk() {
+    this.stillStand();
+    this.quiet = WALK_REST_MIN + Math.random() * (WALK_REST_MAX - WALK_REST_MIN);
+  }
+
   private playStandIdle() {
     this.stillStand();
     this.pose = "idle";
@@ -440,7 +458,7 @@ export class Controller {
       visitCount: summary.visitCount,
       lightOn: getLightOn(),
       visitSummary: summary,
-      failedActions: this.failedNow(metrics),
+      failedActions: this.failedNow(),
       trappedChair,
       backBlocked,
       chairInReach,
@@ -453,7 +471,7 @@ export class Controller {
     const plan = withObjectTarget(normalizePlan(raw) ?? raw, this.catalog(metrics));
     const snap = this.snapshot(metrics);
     if (!isAdvertisedPlan(plan, snap)) return;
-    if (this.failedNow(metrics).includes(plan.action)) {
+    if (failedPlan(this.failedNow(), plan.action, plan.target)) {
       if (!(plan.action === "kick" && this.isTrapped(metrics))) return;
     }
     this.lookingAtUser = plan.action === "look_at_user";
@@ -462,11 +480,11 @@ export class Controller {
 
   request(raw: Plan, metrics: ShoeboxMetrics) {
     const plan = withObjectTarget(normalizePlan(raw) ?? raw, this.catalog(metrics));
-    this.record(plan.action);
+    this.record(plan);
     switch (plan.action) {
       case "walk_to":
         this.pendingSit = false;
-        this.goTo(this.walkTarget(plan, metrics), metrics);
+        this.goTo(randomClearFloor(metrics), metrics);
         break;
       case "sit":
         this.sit(metrics);
@@ -493,13 +511,13 @@ export class Controller {
         this.holdStill();
         break;
       case "push":
-        if (!this.pushChair(metrics)) this.noteFail("push");
+        if (!this.pushChair(metrics)) this.noteFail("push", plan.target);
         break;
       case "move":
-        if (!this.moveChair(metrics)) this.noteFail("move");
+        if (!this.moveChair(metrics)) this.noteFail("move", plan.target);
         break;
       case "kick":
-        if (!this.kickChair(metrics)) this.noteFail("kick");
+        if (!this.kickChair(metrics)) this.noteFail("kick", plan.target);
         break;
       case "light_on":
         this.pullLamp(true, metrics);
@@ -537,7 +555,7 @@ export class Controller {
 
   clickChair(metrics: ShoeboxMetrics) {
     this.sit(metrics);
-    this.record("sit");
+    this.record("sit", CHAIR_ID);
   }
 
   clickCharacter() {
@@ -654,7 +672,7 @@ export class Controller {
       this.walk = null;
       this.footLock = null;
       if (onArrive) this.arriveOrStop(this.walkDest?.x ?? this.x, this.walkDest?.z ?? this.z, onArrive);
-      else this.stillStand();
+      else this.restAfterWalk();
       return;
     }
     if (this.maybeTurn()) return;
@@ -799,13 +817,13 @@ export class Controller {
   private prepareSit() {
     const metrics = this.lastMetrics;
     if (!metrics) {
-      this.noteFail("sit");
+      this.noteFail("sit", CHAIR_ID);
       this.stillStand();
       return;
     }
     if (!this.atSitApproach(metrics)) {
       if (this.nearSitEntry(metrics) && !onChairFront(this.x, this.z, metrics)) {
-        this.noteFail("sit");
+        this.noteFail("sit", CHAIR_ID);
         this.stillStand();
         return;
       }
@@ -828,7 +846,7 @@ export class Controller {
   private beginSitDown() {
     const metrics = this.lastMetrics;
     if (!metrics) {
-      this.noteFail("sit");
+      this.noteFail("sit", CHAIR_ID);
       this.stillStand();
       return;
     }
@@ -1068,7 +1086,7 @@ export class Controller {
         );
         return;
       }
-      this.noteFail("sit");
+      this.noteFail("sit", CHAIR_ID);
       this.stillStand();
       return;
     }
@@ -1287,12 +1305,6 @@ export class Controller {
     this.afterOneShot = () => this.finishTurn();
   }
 
-  private walkTarget(plan: Plan, metrics: ShoeboxMetrics): [number, number, number] {
-    if (plan.target === CHAIR_ID) return chairStandPoint(metrics);
-    if (plan.target === LAMP_ID) return lampPullPoint(metrics);
-    return randomClearFloor(metrics);
-  }
-
   private pullLamp(on: boolean, metrics: ShoeboxMetrics) {
     if (this.seated) {
       this.stand(() => this.pullLamp(on, metrics));
@@ -1332,7 +1344,7 @@ export class Controller {
   private pushChair(metrics: ShoeboxMetrics, recover = false) {
     if (this.seated) {
       this.stand(() => {
-        if (!this.pushChair(metrics, recover)) this.noteFail("push");
+        if (!this.pushChair(metrics, recover)) this.noteFail("push", CHAIR_ID);
       });
       return true;
     }
@@ -1356,7 +1368,7 @@ export class Controller {
   private moveChair(metrics: ShoeboxMetrics) {
     if (this.seated) {
       this.stand(() => {
-        if (!this.moveChair(metrics)) this.noteFail("move");
+        if (!this.moveChair(metrics)) this.noteFail("move", CHAIR_ID);
       });
       return true;
     }
@@ -1379,7 +1391,7 @@ export class Controller {
     if (this.kickDepth > 1) return false;
     if (this.seated) {
       this.stand(() => {
-        if (!this.kickChair(metrics, after)) this.noteFail("kick");
+        if (!this.kickChair(metrics, after)) this.noteFail("kick", CHAIR_ID);
       });
       return true;
     }
@@ -1444,17 +1456,22 @@ export class Controller {
     return `${c.u.toFixed(3)},${c.v.toFixed(3)},${c.yaw.toFixed(2)},${getLightOn() ? 1 : 0},${this.seated ? 1 : 0}`;
   }
 
-  private noteFail(action: ActionName) {
-    this.failedAt.set(action, this.roomState());
+  private noteFail(action: ActionName, target?: string) {
+    this.failedAt.set(target ? `${action}:${target}` : action, this.roomState());
     noteVisitFail();
   }
 
-  private failedNow(_metrics: ShoeboxMetrics) {
+  private failedNow(): PlanTrace[] {
     const key = this.roomState();
-    const out: string[] = [];
-    for (const [action, when] of this.failedAt) {
-      if (when === key) out.push(action);
-      else this.failedAt.delete(action);
+    const out: PlanTrace[] = [];
+    for (const [planKey, when] of this.failedAt) {
+      if (when !== key) {
+        this.failedAt.delete(planKey);
+        continue;
+      }
+      const cut = planKey.indexOf(":");
+      if (cut > 0) out.push({ action: planKey.slice(0, cut) as ActionName, target: planKey.slice(cut + 1) });
+      else out.push({ action: planKey as ActionName });
     }
     return out;
   }
@@ -1626,7 +1643,7 @@ export class Controller {
     rememberBadChair(getChairUV());
     persistFurnitureNow();
     this.kickTries += 1;
-    this.record("kick");
+    this.record("kick", CHAIR_ID);
     if (this.kickTries > 8) {
       this.kickTries = 0;
       this.recoverTries = 0;
@@ -1717,8 +1734,8 @@ export class Controller {
     rememberBadChair(getChairUV());
     persistFurnitureNow();
     this.recoverTries += 1;
-    this.noteFail("move");
-    this.record("kick");
+    this.noteFail("move", CHAIR_ID);
+    this.record("kick", CHAIR_ID);
     if (this.recoverTries > 8) {
       this.defer(() => {
         if (!this.kickTowardDefault(metrics) && !this.kickChair(metrics, "recover")) {
@@ -1768,13 +1785,21 @@ export class Controller {
       return;
     }
     if (this.pendingSit) {
-      this.noteFail("sit");
+      this.noteFail("sit", CHAIR_ID);
+      this.stillStand();
+      return;
     }
-    this.stillStand();
+    if (onArrive) {
+      this.stillStand();
+      return;
+    }
+    this.restAfterWalk();
   }
 
-  private record(action: ActionName | string) {
-    this.lastActions.push(action);
+  private record(action: ActionName | Plan, target?: string) {
+    const trace =
+      typeof action === "object" ? planTrace(action.action, action.target) : planTrace(action, target);
+    this.lastActions.push(trace);
     if (this.lastActions.length > 16) this.lastActions.shift();
   }
 }

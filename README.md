@@ -33,13 +33,13 @@ The browser never calls `dummyThink`. Every think tick is `fetch("/api/think")` 
 
 Plans are `{ action, target? }`. Invalid action → 400. Unadvertised or unaffordable plan → `{ action: "idle" }`. The worker also fills a missing `target` when exactly one object offers that verb.
 
-The scene asks for a plan every **8 s**, unless `walkBusy()` (walk, sit, stand, chair tween, one-shot, still hold, turns) or `thoughts >= 40` (`THOUGHT_CAP`). After the cap, the last pose just continues.
+The scene asks for a plan every **8 s**, unless `walkBusy()` (walk, sit, stand, chair tween, one-shot, still hold, **wander rest**, turns) or `thoughts >= 40` (`THOUGHT_CAP`). After the cap, the last pose just continues. A finished `walk_to` occupies 8–18 s of still so the director cannot immediately reissue a wander.
 
 ### Actions
 
-Self (no object required): `idle`, `still`, `fidget`, `walk_to`, `stand`, `wave`, `glare`, `look_at_user`, `emote`.
+Self (no object required, never set `target`): `idle`, `still`, `fidget`, `walk_to`, `stand`, `wave`, `glare`, `look_at_user`, `emote`.
 
-Object verbs must appear on that object’s `affordances` and set `target` to its id:
+Object verbs must appear on that object’s `affordances` and set `target` to its id. A missing target is filled only when **exactly one** object offers that verb; two chairs that both advertise `sit` will not be guessed.
 
 | Object | Verbs |
 | --- | --- |
@@ -56,7 +56,7 @@ Chair verbs (personality is not in this list — only room facts):
 - else `push` + `move`
 - **peak anger** also advertises `kick` from far away (walk first)
 
-`walk_to` may optionally target `chair-1` or `lamp-1`; otherwise the controller picks a clear floor point.
+`walk_to` is a wander to a clear floor point. It does not take an object target — approaching furniture is the object verb (`sit`, `push`, `light_off`, …).
 
 `idle` is a looping weight-shift. **`still`** is a frozen hold (12–36 s). `emote` is a shrug.
 
@@ -66,9 +66,9 @@ Each think POST (`src/brain/schema.ts`) includes:
 
 - `objects` with live `affordances` and poses
 - `character`: pose, seated, mood, energy (decays over time; dummy ignores it), pos
-- `lastActions` (last 8)
+- `lastActions` (last 8 `{ action, target? }` traces)
 - `user`: `stareSeconds` (hovering the canvas, production too), `poked` (dev click on the puppet)
-- `mood`, `visitCount`, `lightOn`, `visitSummary`, `failedActions`, `trappedChair`, `backBlocked`, `chairInReach`, `failCount`, `badChairPoses`
+- `mood`, `visitCount`, `lightOn`, `visitSummary`, `failedActions` (`{ action, target? }` that failed in this room state), `trappedChair`, `backBlocked`, `chairInReach`, `failCount`, `badChairPoses`
 
 Mood is an input to the brain, not an output. The model/dummy does not set mood.
 
@@ -133,7 +133,7 @@ Chair default is the right-back corner, yaw −60°.
 - **`move`:** same approach, then a random legal pose (yaw can change). Skips `badChair` and poses that trap the puppet.
 - **`kick`:** stand on the wall-facing side; the chair slides into the room, never toward the kicker’s feet. Used when trapped / back blocked, or under peak anger from across the room.
 
-Failed rearrange verbs stay in `failedActions` until room state changes (the dummy/LLM should not retry them). If a kick is the only chair verb advertised while trapped, dummy prefers it.
+Failed rearrange plans stay in `failedActions` as `{ action, target }` until room state changes (the dummy/LLM should not retry that pair). If a kick is the only chair verb advertised while trapped, dummy prefers it.
 
 Lamp: walk to room center, play pull, toggle `lightOn`. Dummy rarely picks lamp verbs; angry / dark-habit bias toward off, happy toward on.
 
