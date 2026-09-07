@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { floorPoint, floorUV, type ShoeboxMetrics } from "./shoebox";
 
 export const CHAIR_ID = "chair-1";
+export const LAMP_ID = "lamp-1";
 export const CHAIR_SEAT_HEIGHT = 0.47;
 export const CHAIR_SEAT = CHAIR_SEAT_HEIGHT;
 export const CHAIR_SIZE: [number, number, number] = [
@@ -62,6 +63,10 @@ export function defaultChairUV(metrics: ShoeboxMetrics): ChairUV {
 
 export function getChairUV() {
   return chair;
+}
+
+export function lampLive(metrics: ShoeboxMetrics) {
+  return { x: metrics.width / 2, z: -metrics.depth / 2 };
 }
 
 export function getLightOn() {
@@ -128,11 +133,21 @@ export function chairLive(metrics: ShoeboxMetrics): ChairWorld {
   return { x, z, yaw: chair.yaw };
 }
 
+/** Pelvis socket on the front of the seat. Sit plays in place here. */
 export function chairSitPoint(metrics: ShoeboxMetrics): [number, number, number] {
   const { x, z, yaw } = chairLive(metrics);
   const f = chairFwd(yaw);
-  const d = CHAIR_SEAT / 2 - 0.01;
+  const d = CHAIR_SEAT / 2 - 0.05;
   return [x + f.x * d, 0, z + f.z * d];
+}
+
+/** Stand here, facing the chair, then sit onto the socket. */
+export function chairSitEntry(metrics: ShoeboxMetrics): [number, number, number] {
+  const { x, z, yaw } = chairLive(metrics);
+  const f = chairFwd(yaw);
+  const d = CHAIR_SEAT / 2 + 0.1;
+  const held = clampRoom(x + f.x * d, z + f.z * d, metrics);
+  return [held.x, 0, held.z];
 }
 
 export function chairExtent(yaw: number) {

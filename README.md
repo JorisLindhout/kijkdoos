@@ -38,13 +38,13 @@ Preview with `?hour=13` (day) or `?hour=1` (night).
 
 Standing and sitting both have a living idle (weight shift, look around) and **still** (frozen). He does not always move.
 
-The dummy brain can pick: `idle`, `still`, `fidget`, `walk_to`, `sit`, `stand`, `wave`, `glare`, `look_at_user`, `emote`, `push_chair`, `move_chair`, `kick_chair`, `light_on`, `light_off`. Turns happen locally while walking. Fidget, look, and still work in the chair too.
+The dummy brain can pick self actions (`idle`, `still`, `fidget`, `walk_to`, `stand`, `wave`, `glare`, `look_at_user`, `emote`) or a verb an object currently advertises. Chair `chair-1` offers `sit`, `push`, `move`, and `kick` when those are physically possible. Lamp `lamp-1` offers `light_on` or `light_off`. Turns happen locally while walking. Fidget, look, and still work in the chair too.
 
 ## Furniture and lamp
 
-Chair `chair-1` keeps a live pose (floor UV + yaw). Sit and stand use the open face (the seat). `push_chair` and `move_chair` walk behind the backrest, grab the top rail, then slide or turn.
+Chair `chair-1` keeps a live pose (floor UV + yaw). Sit and stand use the open face (the seat). `push` and `move` walk behind the backrest, grab the top rail, then slide or turn.
 
-If he cannot get behind it (corner or wall) and he is next to it, he `kick_chair`s from the wall-facing side so the chair slides away from him into the room, then tries the back grab again. He cannot kick a chair across the room. If he is already on the wall-facing side, he kicks from there. If the path is blocked, he steps aside first rather than walking into the chair. While `trappedChair`, or `backBlocked` while `chairInReach`, the dummy keeps picking kick until he can walk. Peak anger can walk over and kick even when the chair is not stuck. Poses that trapped him are stored and sent as `badChairPoses` / `trappedChair` / `backBlocked` so a later model can avoid them.
+If he cannot get behind it (corner or wall) and he is next to it, the chair advertises `kick` instead of `push`/`move`. He kicks from the wall-facing side so the chair slides away from him into the room, then tries the back grab again. He cannot kick a chair across the room unless peak anger advertises `kick` from far away. If he is already on the wall-facing side, he kicks from there. If the path is blocked, he steps aside first rather than walking into the chair. While `trappedChair`, or `backBlocked` while `chairInReach`, `kick` stays advertised until he can walk. Poses that trapped him are stored and sent as `badChairPoses` / `trappedChair` / `backBlocked`.
 
 The hanging lamp can go off. He walks under the bulb and pulls the cord. The floor stays barely readable; it is never a black frame. Day/night still tints that dim fill.
 
@@ -59,7 +59,7 @@ Each time the page is shown, a visit starts. Mood is derived from the last **40*
 - last visit 2 min or more, or three of the last five that long → happy
 - otherwise → calm
 
-The dummy weights glare, sit, wave, still, the lamp, and kicks from those counts and streaks. Fails this visit (`failCount`) can turn the live mood angry. A later model can read the same snapshot fields (`mood`, `visitCount`, `lightOn`, `visitSummary`, `trappedChair`, `backBlocked`, `chairInReach`, `failCount`, `failedActions`, `badChairPoses`).
+The dummy weights glare, sit, wave, still, the lamp, and kicks from those counts and streaks. Two short visits in a row, or three failed moves this visit, is peak anger (he may walk over and kick). Fails this visit (`failCount`) can turn the live mood angry. A later model can read the same snapshot fields (`mood`, `visitCount`, `lightOn`, `visitSummary`, `trappedChair`, `backBlocked`, `chairInReach`, `failCount`, `failedActions`, `badChairPoses`).
 
 ## Leftover
 

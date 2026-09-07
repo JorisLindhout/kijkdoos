@@ -1,5 +1,13 @@
 import { dummyThink } from "../src/brain/dummy";
-import { ACTIONS, isActionName, type Plan, type Snapshot } from "../src/brain/schema";
+import {
+  ACTIONS,
+  isActionName,
+  isAdvertisedPlan,
+  normalizePlan,
+  withObjectTarget,
+  type Plan,
+  type Snapshot,
+} from "../src/brain/schema";
 
 type Env = {
   BRAIN: "dummy" | "cf";
@@ -34,15 +42,13 @@ const PLAN_JSON_SCHEMA = {
 
 const SYSTEM = `You are the director of a silent shoebox resident. Reply with JSON only:
 {"action":"...","target":"..."}
-action must be one of: idle, still, fidget, walk_to, sit, stand, wave, glare, look_at_user, emote, push_chair, move_chair, kick_chair, light_on, light_off.
-target must be an id from the snapshot objects list, or omitted.
-Never invent objects. Prefer one action. Do not narrate. Omit say, mood, and all other keys.
-Snapshot mood, visitCount, lightOn, visitSummary, failCount, backBlocked, chairInReach, and trappedChair are facts. Rearrange and lamp actions are rare.
-failedActions are plans that just failed in this room state. Do not pick them until the chair, lamp, or sit state changes.
-backBlocked means he cannot stand behind the chair. If he is next to it (chairInReach), pick kick_chair so the chair slides away from him into the room, then push_chair or move_chair. Never pick move_chair while trappedChair or backBlocked.
-If trappedChair is set and he is next to the chair, keep picking kick_chair until he can walk again. Do not pick still while trapped next to it.
-Do not kick_chair while the chair is across the room. Peak anger (mood angry with shortStreak 3+, or failCount 5+) may pick kick_chair from far away; he will walk there first.
-A high failCount means he is frustrated; prefer glare, still, and kick_chair; do not keep repeating the same failed rearrange.
+Self actions (no target): idle, still, fidget, walk_to, stand, wave, glare, look_at_user, emote.
+Object actions MUST use a verb from that object's affordances and set target to that object's id.
+Never invent objects or verbs. Prefer one action. Do not narrate. Omit say, mood, and all other keys.
+Default to still — he freezes more than he fidgets. Idle is a living weight-shift and should be rarer than still.
+Rearrange (push, move, kick) and lamp (light_on, light_off) are rare unless kick is the only chair verb advertised.
+failedActions are verbs that just failed in this room state. Do not pick them until the object state changes.
+If kick is advertised, prefer it over still while trapped. Peak anger may pick kick when advertised even from across the room.
 badChairPoses are chair floor poses that pinned him against a wall. Do not move the chair back to those poses.`;
 
 export default {
@@ -65,16 +71,15 @@ export default {
     }
 
     const plan = await think(env, snapshot);
-    if (!isActionName(plan.action)) {
+    const normalized = withObjectTarget(normalizePlan(plan) ?? plan, snapshot.objects);
+    if (!isActionName(normalized.action)) {
       return Response.json({ error: "invalid action" }, { status: 400 });
     }
-
-    const ids = new Set(snapshot.objects.map((o) => o.id));
-    if (plan.target && !ids.has(plan.target)) {
+    if (!isAdvertisedPlan(normalized, snapshot)) {
       return Response.json({ action: "idle" });
     }
 
-    return Response.json(plan);
+    return Response.json(normalized);
   },
 };
 
@@ -108,13 +113,15 @@ async function cfThink(env: Env, snapshot: Snapshot): Promise<Plan> {
 
 function parsePlan(value: unknown): Plan {
   const rec = asRecord(unwrapAi(value));
-  if (!rec || typeof rec.action !== "string" || !isActionName(rec.action)) {
+  if (!rec || typeof rec.action !== "string") {
     throw new Error("bad plan");
   }
-  return {
+  const plan = normalizePlan({
     action: rec.action,
     target: typeof rec.target === "string" ? rec.target : undefined,
-  };
+  });
+  if (!plan) throw new Error("bad plan");
+  return plan;
 }
 
 function unwrapAi(value: unknown): unknown {
@@ -143,7 +150,7 @@ function parseJsonish(text: string): unknown {
     /* fall through */
   }
   const action = /"action"\s*:\s*"([a-z_]+)"/.exec(trimmed);
-  if (!action || !isActionName(action[1])) return trimmed;
+  if (!action) return trimmed;
   const target = /"target"\s*:\s*"([^"]*)"/.exec(trimmed);
   return target ? { action: action[1], target: target[1] } : { action: action[1] };
 }

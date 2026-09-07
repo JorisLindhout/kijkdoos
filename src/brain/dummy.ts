@@ -1,6 +1,14 @@
-import type { Plan, Snapshot } from "./schema";
+import {
+  isPeakAngerState,
+  offering,
+  PEAK_SHORT_STREAK,
+  type Plan,
+  type Snapshot,
+} from "./schema";
 
-const REARRANGE = new Set(["push_chair", "move_chair", "kick_chair"]);
+const PEAK_KICK = 0.12;
+
+const REARRANGE = new Set(["push", "move", "kick"]);
 const LAMP = new Set(["light_on", "light_off"]);
 
 export function dummyThink(snapshot: Snapshot): Plan {
@@ -9,18 +17,17 @@ export function dummyThink(snapshot: Snapshot): Plan {
   const failed = new Set(snapshot.failedActions ?? []);
   const recent = (action: string) => last.slice(-5).includes(action);
   const skipped = (action: string) => failed.has(action);
-  const chair = snapshot.objects.find((o) => o.affordances.includes("sit"));
+  const use = (verb: string) => offering(snapshot.objects, verb);
   const stare = snapshot.user.stareSeconds ?? 0;
   const mood = snapshot.mood ?? snapshot.character.mood ?? "calm";
   const summary = snapshot.visitSummary;
-  const lightOn = snapshot.lightOn ?? true;
-  const standing = pose !== "sit";
+  const standing = !(snapshot.character.seated ?? pose === "sit");
   const shy = mood === "shy";
   const angry = mood === "angry";
   const happy = mood === "happy";
-  const angryStreak = (summary?.shortStreak ?? 0) >= 3;
+  const angryStreak = (summary?.shortStreak ?? 0) >= PEAK_SHORT_STREAK;
   const failCount = snapshot.failCount ?? 0;
-  const peakAnger = (angry && angryStreak) || failCount >= 5;
+  const peakAnger = isPeakAngerState(mood, summary?.shortStreak ?? 0, failCount);
   const darkHabit = summary?.darkHabit ?? false;
   const neverSat = summary?.neverSatLast10 ?? false;
   const pokedOften = (summary?.pokeRateLast10 ?? 0) >= 3;
@@ -28,37 +35,50 @@ export function dummyThink(snapshot: Snapshot): Plan {
     .slice(-6)
     .some((action) => REARRANGE.has(action) && !failed.has(action));
   const lampRecent = last.slice(-4).some((action) => LAMP.has(action) && !failed.has(action));
+  const chairKick = use("kick");
+  const chairPush = use("push");
+  const chairMove = use("move");
+  const chairSit = use("sit");
+  const lampOn = use("light_on");
+  const lampOff = use("light_off");
 
   if (snapshot.user.poked) {
     return { action: "glare" };
   }
 
-  if (standing && snapshot.trappedChair && chairInReach(snapshot)) {
-    return { action: "kick_chair" };
+  if (standing && chairKick && (snapshot.trappedChair || snapshot.backBlocked) && snapshot.chairInReach) {
+    return { action: "kick", target: chairKick.id };
   }
 
-  if (standing && snapshot.backBlocked && chairInReach(snapshot) && !skipped("kick_chair")) {
-    return { action: "kick_chair" };
-  }
-
-  if (standing && peakAnger && !skipped("kick_chair") && !recent("kick_chair") && Math.random() < 0.04) {
-    return { action: "kick_chair" };
+  if (standing && chairKick && peakAnger && !skipped("kick") && !recent("kick") && Math.random() < PEAK_KICK) {
+    return { action: "kick", target: chairKick.id };
   }
 
   if (standing && !lampRecent) {
-    const lamp = lampPlan({ lightOn, angry, happy, angryStreak, darkHabit });
+    const lamp = lampPlan({
+      on: lampOn,
+      off: lampOff,
+      angry,
+      happy,
+      angryStreak,
+      darkHabit,
+    });
     if (lamp && !skipped(lamp.action)) return lamp;
   }
 
-  if (standing && !rearranged && !shy && Math.random() < 0.02 && !(snapshot.backBlocked && !chairInReach(snapshot))) {
-    const canPush = !skipped("push_chair");
-    const canMove = !skipped("move_chair");
-    if (canPush && canMove) return { action: Math.random() < 0.5 ? "push_chair" : "move_chair" };
-    if (canPush) return { action: "push_chair" };
-    if (canMove) return { action: "move_chair" };
+  if (standing && !rearranged && !shy && Math.random() < 0.02) {
+    const push = chairPush && !skipped("push") ? chairPush : null;
+    const move = chairMove && !skipped("move") ? chairMove : null;
+    if (push && move) {
+      return Math.random() < 0.5
+        ? { action: "push", target: push.id }
+        : { action: "move", target: move.id };
+    }
+    if (push) return { action: "push", target: push.id };
+    if (move) return { action: "move", target: move.id };
   }
 
-  if (pose === "sit") {
+  if (snapshot.character.seated || pose === "sit") {
     if (!recent("stand") && Math.random() < (angry ? 0.04 : 0.08)) return { action: "stand" };
     const pick = Math.random();
     const stillCut = angry || angryStreak ? 0.72 : 0.65;
@@ -69,8 +89,8 @@ export function dummyThink(snapshot: Snapshot): Plan {
   }
 
   const sitChance = neverSat ? 0.03 : shy ? 0.06 : 0.1;
-  if (chair && pose !== "sit" && !recent("sit") && Math.random() < sitChance) {
-    return { action: "sit", target: chair.id };
+  if (chairSit && !recent("sit") && Math.random() < sitChance) {
+    return { action: "sit", target: chairSit.id };
   }
 
   const lookChance = neverSat ? 0.32 : stare >= 10 && !recent("look_at_user") ? 0.2 : 0.08;
@@ -96,16 +116,9 @@ export function dummyThink(snapshot: Snapshot): Plan {
   return { action: "still" };
 }
 
-function chairInReach(snapshot: Snapshot): boolean {
-  if (snapshot.chairInReach != null) return snapshot.chairInReach;
-  const chair = snapshot.objects.find((o) => o.affordances.includes("sit"));
-  if (!chair) return false;
-  const p = snapshot.character.pos;
-  return Math.hypot(chair.pos[0] - p[0], chair.pos[2] - p[2]) < 0.85;
-}
-
 function lampPlan(opts: {
-  lightOn: boolean;
+  on: { id: string } | undefined;
+  off: { id: string } | undefined;
   angry: boolean;
   happy: boolean;
   angryStreak: boolean;
@@ -114,12 +127,15 @@ function lampPlan(opts: {
   const bias = opts.angry || opts.angryStreak || opts.darkHabit ? 1.6 : 1;
   if (Math.random() >= 0.02 * bias) return null;
   if (opts.happy) {
-    if (!opts.lightOn && Math.random() < 0.75) return { action: "light_on" };
+    if (opts.on && Math.random() < 0.75) return { action: "light_on", target: opts.on.id };
     return null;
   }
   if (opts.angry || opts.angryStreak || opts.darkHabit) {
-    if (opts.lightOn) return { action: "light_off" };
-    return Math.random() < 0.75 ? { action: "light_off" } : { action: "light_on" };
+    if (opts.off) return { action: "light_off", target: opts.off.id };
+    if (opts.on) return { action: "light_on", target: opts.on.id };
+    return null;
   }
-  return { action: opts.lightOn ? "light_off" : "light_on" };
+  if (opts.off) return { action: "light_off", target: opts.off.id };
+  if (opts.on) return { action: "light_on", target: opts.on.id };
+  return null;
 }

@@ -62,6 +62,10 @@ function alongChair(
 }
 
 export function chairStandPoint(metrics: ShoeboxMetrics): [number, number, number] {
+  for (const gap of [CHAIR_STAND_GAP, 0.24, 0.2]) {
+    const [x, y, z] = alongChair(metrics, gap);
+    if (onChairFront(x, z, metrics) && !overlapsChair(x, z, metrics)) return [x, y, z];
+  }
   return alongChair(metrics, CHAIR_STAND_GAP);
 }
 
@@ -257,6 +261,12 @@ export function pushOutOfChair(x: number, z: number, metrics: ShoeboxMetrics): F
 
 export function behindChair(x: number, z: number, metrics: ShoeboxMetrics): boolean {
   return chairLocal(x, z, metrics).lz < 0;
+}
+
+export function onChairFront(x: number, z: number, metrics: ShoeboxMetrics): boolean {
+  const { lx, lz } = chairLocal(x, z, metrics);
+  const { hx, hz } = chairHalf();
+  return lz >= hz * 0.15 && Math.abs(lx) <= hx + ACTOR_RADIUS + 0.16;
 }
 
 export function onChairBack(x: number, z: number, metrics: ShoeboxMetrics): boolean {

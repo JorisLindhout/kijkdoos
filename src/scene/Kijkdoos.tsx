@@ -8,7 +8,7 @@ import { PaletteBridge, usePalette } from "../useTheme";
 import { endVisit, hydrateVisit, noteVisitStare } from "../visit";
 import { CeilingLamp, OFF_FILL } from "./CeilingLamp";
 import { ChairBox } from "./ChairBox";
-import { getChairUV, getLightOn, setChairUV, useFurniture } from "./furniture";
+import { CHAIR_ID, getChairUV, getLightOn, LAMP_ID, setChairUV, useFurniture } from "./furniture";
 import { Resident } from "./Resident";
 import { Room } from "./Room";
 import { ShoeboxCamera } from "./ShoeboxCamera";
@@ -52,14 +52,17 @@ function Scene() {
       if (key === "l") c.request({ action: "look_at_user" }, metrics);
       if (key === "e") c.request({ action: "emote" }, metrics);
       if (key === "i") c.request({ action: "still" }, metrics);
-      if (key === "s") c.request({ action: "sit" }, metrics);
+      if (key === "s") c.request({ action: "sit", target: CHAIR_ID }, metrics);
       if (key === "x" && c.seated) c.request({ action: "stand" }, metrics);
       if (key === "o") {
-        c.request({ action: getLightOn() ? "light_off" : "light_on" }, metrics);
+        c.request(
+          { action: getLightOn() ? "light_off" : "light_on", target: LAMP_ID },
+          metrics,
+        );
       }
-      if (key === "p") c.request({ action: "push_chair" }, metrics);
-      if (key === "m") c.request({ action: "move_chair" }, metrics);
-      if (key === "k") c.request({ action: "kick_chair" }, metrics);
+      if (key === "p") c.request({ action: "push", target: CHAIR_ID }, metrics);
+      if (key === "m") c.request({ action: "move", target: CHAIR_ID }, metrics);
+      if (key === "k") c.request({ action: "kick", target: CHAIR_ID }, metrics);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

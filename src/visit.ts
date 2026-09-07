@@ -1,4 +1,4 @@
-import type { Mood, VisitSummary } from "./brain/schema";
+import { isPeakAngerState, PEAK_FAIL_COUNT, type Mood, type VisitSummary } from "./brain/schema";
 import {
   defaultChairUV,
   getBadChair,
@@ -146,14 +146,13 @@ export function getFailCount() {
 }
 
 export function isPeakAnger() {
-  if (getFailCount() >= 5) return true;
-  return getLiveMood() === "angry" && getVisitSummary().shortStreak >= 3;
+  return isPeakAngerState(getLiveMood(), getVisitSummary().shortStreak, getFailCount());
 }
 
 export function noteVisitFail() {
   if (!live) return;
   live.failCount += 1;
-  if (live.failCount >= 3) live.mood = "angry";
+  if (live.failCount >= PEAK_FAIL_COUNT) live.mood = "angry";
 }
 
 export function getVisitSummary(): VisitSummary {

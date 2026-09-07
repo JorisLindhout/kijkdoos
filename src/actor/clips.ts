@@ -54,11 +54,11 @@ export function clipForAction(action: ActionName): { clip: ClipId; loop: boolean
     case "light_on":
     case "light_off":
       return { clip: CLIP.pull, loop: false };
-    case "push_chair":
+    case "push":
       return { clip: CLIP.chairPush, loop: true };
-    case "move_chair":
+    case "move":
       return { clip: CLIP.chairMove, loop: true };
-    case "kick_chair":
+    case "kick":
       return { clip: CLIP.chairKick, loop: false };
     default:
       return null;
